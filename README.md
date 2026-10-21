@@ -11,6 +11,10 @@ DIP-VAULT-FORMAT-NOTE.txt.
 
 ## What is here
 
+- `submission/` - the exact files for the Workshop submit page (hook, script, hook.json,
+  keeper.json, the 595-character words) with a README for Bordrless. A zip of it sits on the
+  owner's Desktop for sharing.
+
 - `hook_variants/dipvault/` - the hook (hold clock in every holding, 1% brake for the first 10
   minutes of a hold, the sell relay against the dust-delegate trick, `record_payout` for the
   companion). `hook.json` beside it.
