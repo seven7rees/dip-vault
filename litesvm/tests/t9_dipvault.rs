@@ -303,6 +303,32 @@ fn t9_the_whole_story() {
     let hs = hook_state(&w, &mint);
     assert_eq!(hs.relay_owner, a.pubkey(), "the relay holds the last seller");
 
+    // The dust-delegate trick: d bought dust long ago (its own clock is old), y buys now and
+    // approves d as its delegate; d signs the sell of y's coins. The launchpad hands quote_cut
+    // d's holding (old), but the relay carries y's clock (young): the brake is taken.
+    let d = w.env.funded(5 * SOL);
+    buy(&mut w, &d, &mint, SOL / 100).ok();
+    w.env.warp(1_000);
+    let y = w.env.funded(5 * SOL);
+    buy(&mut w, &y, &mint, SOL).ok();
+    let y_holding = token::holding_address(&mint, &y.pubkey());
+    let y_held = w.env.holding(&mint, &y.pubkey());
+    w.env
+        .send_paid_by(&[token::approve(y.pubkey(), y_holding, d.pubkey(), y_held)], &y, &[])
+        .ok();
+    let mut ix = swap_ix(&w, &d.pubkey(), &mint, false, y_held / 2);
+    let d_holding = token::holding_address(&mint, &d.pubkey());
+    let slot_index = ix.accounts.iter().position(|m| m.pubkey == d_holding).expect("the trader's base holding");
+    ix.accounts[slot_index].pubkey = y_holding;
+    let accrued_before = w.launch(&mint).quote_cut_accrued();
+    let tx = w.env.send_paid_by(&[ix], &d, &[]);
+    assert!(tx.result.is_ok(), "a delegate sell: {}", tx.logs().join("\n"));
+    let accrued_after = w.launch(&mint).quote_cut_accrued();
+    assert!(accrued_after > accrued_before, "the brake keys on y's clock through the relay");
+    assert_eq!(hook_state(&w, &mint).relay_owner, y.pubkey(), "the relay names the real source");
+    assert_eq!(record_of(&w, &mint, &d.pubkey()).amount, w.env.holding(&mint, &d.pubkey()), "d's own coins untouched");
+    assert!(record_of(&w, &mint, &y.pubkey()).sold(), "y's record carries the sold flag");
+
     // The fees into the pot; the first step splits them and pays the builder.
     let cranker = w.env.funded(5 * SOL);
     claim(&mut w, &cranker, &mint).ok();
@@ -339,6 +365,7 @@ fn t9_the_whole_story() {
     let held_before = w.env.holding(&mint, &companion::creator_address(&mint));
     let tx = step(&mut w, &cranker, &mint, &[]);
     tx.ok();
+    println!("T9 dip-buy step: {} CU, {} instructions, height {}", tx.cu(), tx.trace_len(), tx.max_height());
     let s2 = state_of(&w, &mint);
     assert!(s2.tokens_held > 0, "the dip buy kept coins: {s2:?}\n{}", tx.logs().join("\n"));
     assert_eq!(w.env.holding(&mint, &companion::creator_address(&mint)) - held_before, s2.tokens_held);
@@ -378,6 +405,7 @@ fn t9_the_whole_story() {
     let lp_before = w.env.holding(&w.launch_pool(&mint).lp_mint, &launch::launch_address(&mint));
     let tx = step(&mut w, &cranker, &mint, &[]);
     assert!(tx.result.is_ok(), "{}", tx.logs().join("\n"));
+    println!("T9 liquidity step: {} CU, {} instructions, height {}", tx.cu(), tx.trace_len(), tx.max_height());
     let s3 = state_of(&w, &mint);
     let lp_after = w.env.holding(&w.launch_pool(&mint).lp_mint, &launch::launch_address(&mint));
     assert!(s3.lp_minted > 0 && lp_after == lp_before + s3.lp_minted, "LP minted into the launch's holding: {s3:?}\n{}", tx.logs().join("\n"));
@@ -387,13 +415,24 @@ fn t9_the_whole_story() {
 
     // Holder payouts: a new week, the step measures the holders (touches); the week after, pays.
     let week = |t: i64| (t / WEEK) as u32;
+    // Five more holders, so a paying step carries eight entries (PAYOUT_MAX_ENTRIES).
+    let mut more = Vec::new();
+    for _ in 0..5 {
+        let h = w.env.funded(5 * SOL);
+        buy(&mut w, &h, &mint, SOL / 4).ok();
+        more.push(h);
+    }
     let to_next_week = WEEK - (w.env.now % WEEK) + 1;
     w.env.warp(to_next_week);
     buy(&mut w, &c, &mint, SOL / 10).ok();
     claim(&mut w, &cranker, &mint).ok();
-    let holders = [a.pubkey(), b.pubkey(), c.pubkey()];
+    buy(&mut w, &c, &mint, SOL / 20).ok();
+    claim(&mut w, &cranker, &mint).ok();
+    let mut holders = vec![a.pubkey(), b.pubkey(), c.pubkey()];
+    holders.extend(more.iter().map(|h| h.pubkey()));
     let (tx, touches) = payout_step(&mut w, &cranker, &mint, &holders, 2);
-    assert_eq!(touches.len(), 3, "three holders measured\n{}", tx.logs().join("\n"));
+    assert_eq!(touches.len(), 8, "eight holders measured\n{}", tx.logs().join("\n"));
+    println!("T9 measuring step (8 touches): {} CU, {} instructions in the trace, height {}", tx.cu(), tx.trace_len(), tx.max_height());
     assert!(touches.iter().all(|p| p.lamports == 0), "week one measures only");
     let r = week(w.env.now);
     assert!(holders.iter().all(|h| record_of(&w, &mint, h).round == r), "the hook recorded the round");
@@ -411,7 +450,8 @@ fn t9_the_whole_story() {
     claim(&mut w, &cranker, &mint).ok();
     let before: Vec<u64> = holders.iter().map(|h| w.env.lamports(h)).collect();
     let (tx, pays) = payout_step(&mut w, &cranker, &mint, &holders, 2);
-    assert_eq!(pays.len(), 3, "{}", tx.logs().join("\n"));
+    assert_eq!(pays.len(), 8, "{}", tx.logs().join("\n"));
+    println!("T9 paying step (8 payouts): {} CU, {} instructions in the trace, height {}", tx.cu(), tx.trace_len(), tx.max_height());
     let total: u64 = pays.iter().map(|p| p.lamports).sum();
     assert!(total > 0, "week two pays: {:?}", pays.iter().map(|p| p.lamports).collect::<Vec<_>>());
     for (h, b0) in holders.iter().zip(before) {
@@ -419,6 +459,31 @@ fn t9_the_whole_story() {
         let rec = record_of(&w, &mint, h);
         assert_eq!(rec.paid, paid, "the hook's record matches the SOL paid to {h}");
     }
+    // a moves everything to a fresh wallet z: z's clock starts now, this week's round has begun,
+    // so z is not measured or paid this week (not even touched: it is brought again next week).
+    let z = w.env.funded(2 * SOL);
+    let a_held = w.env.holding(&mint, &a.pubkey());
+    let z_holding = token::holding_address(&mint, &z.pubkey());
+    w.env
+        .send_paid_by(
+            &[
+                token::create_holding(a.pubkey(), mint, z.pubkey()),
+                {
+                    let slice = dipvault_script::hook_slice(Some(HOOK), &mint, &w.launch(&mint).pool);
+                    let hook = token::Hook { program: slice[0].pubkey, signer: slice[1].pubkey };
+                    token::transfer_with(a.pubkey(), token::holding_address(&mint, &a.pubkey()), z_holding, mint, Some(hook), slice[2..].to_vec(), a_held)
+                },
+            ],
+            &a,
+            &[],
+        )
+        .ok();
+    assert_eq!(record_of(&w, &mint, &a.pubkey()), Record::default(), "a's record is cleared");
+    w.env.warp(21_601);
+    let tx = step(&mut w, &cranker, &mint, &[z.pubkey()]);
+    assert!(tx.result.is_ok(), "{}", tx.logs().join("\n"));
+    assert!(tx.events::<ScriptPayout>().is_empty(), "moved coins earn nothing this week");
+    assert_eq!(record_of(&w, &mint, &z.pubkey()).round, 0, "z is not even marked: it waits for next week");
     let s5 = state_of(&w, &mint);
     assert_eq!(s5.holders_paid, total);
     assert!(s5.round_paid <= s5.round_budget);

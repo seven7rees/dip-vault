@@ -377,13 +377,32 @@ pub mod dipvault_script {
         let lp_due = graduated
             && now >= ctx.accounts.state.lp_last_at.saturating_add(LP_EVERY_SECS)
             && buy_amount_opt.is_none();
-        // Holders the step brings that this round has not measured yet. On a step where both a
-        // liquidity add and payouts are due, the payouts take every other step, so neither starves.
+        // The owners a payout never goes to.
+        let me = ctx.accounts.creator.key();
+        let excluded = [
+            ctx.accounts.launch.key(),
+            launch.pool,
+            me,
+            ctx.accounts.companion.key(),
+            crate::ID,
+            ctx.accounts.state.key(),
+            terms_key,
+            launch.custom_hook.unwrap_or_default(),
+            beneficiary,
+        ];
+        // Holders the step brings that this round can still measure: a record, this mint, an
+        // eligible owner, not yet measured this round, held since before the round began. On a
+        // step where both a liquidity add and payouts are due, the payouts take every other step.
         let candidates = terms.is_some()
             && ctx.remaining_accounts.iter().any(|info| {
                 *info.owner == bordrless_token::ID
                     && token_client::read_holding(info).is_ok_and(|h| {
-                        h.mint == mint && Record::decode(&h.hook_data).round != round.round
+                        let rec = Record::decode(&h.hook_data);
+                        h.mint == mint
+                            && rec.is_set()
+                            && eligible(&h.owner, &excluded)
+                            && rec.round != round.round
+                            && holders::held_since_round_start(rec.stamp, round.round, ROUND_SECS)
                     })
             });
         let payouts_turn = candidates && (!lp_due || ctx.accounts.state.steps % 2 == 1);
@@ -393,7 +412,6 @@ pub mod dipvault_script {
             None
         };
 
-        let me = ctx.accounts.creator.key();
         let mint_key = ctx.accounts.mint_account.key();
         let slice = hook_slice(launch.custom_hook, &mint, &launch.pool);
         let keys = launch_client::LaunchKeys::of(&launch);
@@ -443,11 +461,13 @@ pub mod dipvault_script {
             let spendable = holding_before.saturating_sub(dev_bag);
             let worth = math::ceil_ratio(spendable, reserves.quote_reserve, reserves.base_reserve).unwrap_or(u64::MAX);
             let mut buy_spent = 0u64;
-            if worth < tranche {
+            if worth < tranche && pool_cap >= PARAMS.min_buy {
+                // Never over the pool cap (the guard against a sandwich), never under the least buy.
                 let buy = liquidity::buy_part(tranche.saturating_sub(worth))
                     .min(pool_cap)
+                    .min(tranche)
                     .max(PARAMS.min_buy)
-                    .min(tranche);
+                    .min(pool_cap);
                 let min_out = math::min_out(
                     buy,
                     reserves.base_reserve,
@@ -468,12 +488,13 @@ pub mod dipvault_script {
                 layout::read_pool_reserves(&data).ok_or(error!(ScriptError::BadAccount))?
             };
             let quote_budget = tranche.saturating_sub(buy_spent);
-            if let Some((base_desired, quote_desired)) = liquidity::pairing(
-                coins,
-                after_buy.base_reserve,
-                after_buy.quote_reserve,
-                quote_budget,
-            ) {
+            // The add, only when the DEX would mint LP for it (a pair too small mints none and
+            // would fail the step for good): the LP the DEX computes from what it pulls.
+            let plan = liquidity::pairing(coins, after_buy.base_reserve, after_buy.quote_reserve, quote_budget)
+                .filter(|(b, q)| {
+                    liquidity::lp_for(*b, *q, after_buy.base_reserve, after_buy.quote_reserve, after_buy.lp_supply) > 0
+                });
+            if let Some((base_desired, quote_desired)) = plan {
                 let lp_before = holding_amount(&all_accounts, &launch.lp_holding).unwrap_or(0);
                 invoke(&liquidity::wrap_sol(me, quote_desired), &all_accounts)?;
                 let add_keys = liquidity::AddKeys {
@@ -531,24 +552,14 @@ pub mod dipvault_script {
             let holding_cap = math::bps64(budget, u64::from(t.holding_bps));
             let rent_min = Rent::get()?.minimum_balance(0);
             if done.spent == 0 {
-                let hook = launch.custom_hook.unwrap_or_default();
-                let excluded = [
-                    ctx.accounts.launch.key(),
-                    launch.pool,
-                    me,
-                    ctx.accounts.companion.key(),
-                    crate::ID,
-                    ctx.accounts.state.key(),
-                    terms_key,
-                    hook,
-                    beneficiary,
-                ];
                 let mut step_left = budget;
+                let mut seen: Vec<Pubkey> = Vec::with_capacity(PAYOUT_MAX_ENTRIES);
                 for (i, info) in ctx.remaining_accounts.iter().enumerate() {
                     if entries.len() == PAYOUT_MAX_ENTRIES || i > usize::from(u8::MAX) {
                         break;
                     }
-                    if *info.owner != bordrless_token::ID {
+                    // A holding of the mint, passed writable (the hook records into it), once.
+                    if *info.owner != bordrless_token::ID || !info.is_writable || seen.contains(info.key) {
                         continue;
                     }
                     let Ok(h) = token_client::read_holding(info) else {
@@ -558,14 +569,20 @@ pub mod dipvault_script {
                         continue;
                     }
                     let rec = Record::decode(&h.hook_data);
-                    if !rec.is_set() || rec.amount != h.amount || rec.round == round.round {
+                    if !rec.is_set()
+                        || rec.amount != h.amount
+                        || rec.round == round.round
+                        || !holders::held_since_round_start(rec.stamp, round.round, ROUND_SECS)
+                    {
                         continue;
                     }
                     let w = record::weight(&rec, h.amount, now);
-                    let mut pay = holders::due(&round, w, piles.holders, step_left, holding_cap);
+                    let pay = holders::due(&round, w, piles.holders, step_left, holding_cap);
                     if pay > 0 {
                         // Paid only into an account the companion will take: its owner's, passed
-                        // writable, plain, system-owned, not left below rent. Else a touch.
+                        // writable, plain, system-owned, not left below rent. Otherwise the
+                        // holding is left alone for a step that carries it right: a sender
+                        // cannot cost a holder its week by leaving its wallet out.
                         let ok = ctx.remaining_accounts.iter().find(|a| *a.key == h.owner).is_some_and(|o| {
                             o.is_writable
                                 && !o.executable
@@ -573,9 +590,10 @@ pub mod dipvault_script {
                                 && o.lamports().checked_add(pay).is_some_and(|l| l >= rent_min)
                         });
                         if !ok {
-                            pay = 0;
+                            continue;
                         }
                     }
+                    seen.push(*info.key);
                     round.w_cur = round.w_cur.saturating_add(w);
                     round.measured = round.measured.saturating_add(1);
                     round.paid = round.paid.saturating_add(pay);

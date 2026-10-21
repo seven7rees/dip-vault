@@ -128,9 +128,9 @@ pub const MIN_PAYOUT_LAMPORTS: u64 = 100_000;
 
 // ─── Locked liquidity: a tranche every other step, dripped over about four hours ─────────────
 
-/// Each liquidity add spends 1/`LP_PACE_STEPS` of the liquidity pile (at 48, about 4 hours of
-/// steps per pile).
-pub const LP_PACE_STEPS: u32 = 48;
+/// Each liquidity add spends 1/`LP_PACE_STEPS` of the liquidity pile: at one add per
+/// `LP_EVERY_SECS` (10 minutes), 24 adds drip a pile over about 4 hours.
+pub const LP_PACE_STEPS: u32 = 24;
 /// The least a liquidity add spends, in lamports: 0.002 SOL (the buy half and the pairing half).
 pub const LP_MIN_ADD: u64 = 2_000_000;
 /// The least time between two liquidity adds: 10 minutes (every other step).

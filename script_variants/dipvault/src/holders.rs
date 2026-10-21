@@ -3,11 +3,13 @@
 //! A round is a week (`ROUND_SECS`), numbered `floor(now / ROUND_SECS)` like the keeper's epoch.
 //! Every holding the keeper brings is measured once a round: its weight (`record::weight`) joins
 //! the round's total `w_cur`, and the hook records the round in its hook data so it is not brought
-//! again until the next one. It is paid from the round's budget (the holder pile at the round's
-//! first step) by its share of the total measured the round before: `budget * w / w_prev`. The
-//! first round measures only; from the second on, each round pays what the previous week's
-//! holders earned. Weight measured in a round beyond the round before's total is paid up to what
-//! the budget has left, first come first served, and a budget not fully paid stays in the pile.
+//! again until the next one. Only a holding whose clock started before the round began counts
+//! (`held_since_round_start`): coins that arrive, or move to a fresh wallet, during the round are
+//! marked and wait for the next one, so moving coins cannot earn twice in a week. A holding
+//! measured is paid at once from the round's budget (the holder pile at the round's first step)
+//! by its share of the total measured the round before: `budget * w / w_prev`. The first round
+//! measures only. Weight measured beyond the round before's total is paid up to what the budget
+//! has left, first come first served, and a budget not fully paid stays in the pile.
 
 use crate::math::share;
 use crate::params::MIN_PAYOUT_LAMPORTS;
@@ -18,6 +20,17 @@ pub fn round_of(now: i64, round_secs: u32) -> u32 {
         return 0;
     }
     u32::try_from((now as u64) / u64::from(round_secs)).unwrap_or(u32::MAX)
+}
+
+/// When `round` begins: `round * round_secs` (saturating).
+pub fn round_start(round: u32, round_secs: u32) -> i64 {
+    i64::from(round).saturating_mul(i64::from(round_secs))
+}
+
+/// Whether a holding whose clock reads `stamp` has held since before `round` began: the only
+/// holdings a round measures and pays.
+pub fn held_since_round_start(stamp: i64, round: u32, round_secs: u32) -> bool {
+    stamp <= round_start(round, round_secs)
 }
 
 /// The round's counters.

@@ -134,3 +134,14 @@ fn the_liquidity_tranche_is_bounded() {
     assert_eq!(lp_tranche(480_000_000, 48, 2_000_000, 500_000), None, "a pool too thin to take the least add");
     assert_eq!(lp_tranche(u64::MAX, 0, 2_000_000, u64::MAX), Some(u64::MAX), "no panic on a zero pace");
 }
+
+#[test]
+fn the_lp_the_dex_would_mint() {
+    use dipvault_script::liquidity::lp_for;
+    assert_eq!(lp_for(100, 200, 1_000, 2_000, 10_000), 1_000, "a tenth of the pool: a tenth of the supply");
+    assert_eq!(lp_for(100, 100, 1_000, 2_000, 10_000), 500, "the short side binds");
+    assert_eq!(lp_for(1, 1, u64::MAX, u64::MAX, 1), 0, "too small: no LP, so no add");
+    assert_eq!(lp_for(1, 1, 0, 1, 1), 0);
+    assert_eq!(lp_for(u64::MAX, u64::MAX, 1, 1, u64::MAX), u64::MAX, "no overflow");
+    assert_eq!(dipvault_script::params::LP_PACE_STEPS, 24, "24 adds, 10 minutes apart: about 4 hours a pile");
+}

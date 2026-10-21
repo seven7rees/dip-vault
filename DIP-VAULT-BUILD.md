@@ -24,8 +24,10 @@ One test, against the Bordrless programs built from the pinned source (`ref/bord
 script launch with the payout terms and wallet payouts allowed (`companion.create`, the hook's
 `prepare`, `create_script_v2`, `allow_wallet_payouts`, `launch_script`); three buys that start
 hold clocks; an early sell that pays the brake (`Launch.quote_cut_accrued` grows) and a sell after
-10 minutes that pays nothing; the relay in the hook state names the last seller; the fees claimed
-into the pot; the first step splits them and pays the builder wallet; a whale pump, eight steps
+10 minutes that pays nothing; the relay in the hook state names the last seller; a real delegate sale (an old dust wallet signs the sell of a young holding's coins through
+`swap_v2` with the young holding in the trader's slot): the DEX accepts it, the brake is taken
+through the relay, the relay names the real source, the dust wallet's own coins are untouched;
+the fees claimed into the pot; the first step splits them and pays the builder wallet; a whale pump, eight steps
 that raise the reference, a dump, then a step that buys the dip and keeps the coins
 (`tokens_held`); the curve filled and graduated; a step that adds locked liquidity and the LP
 lands in `Launch.lp_holding` by exactly `lp_minted`; a new week in which a step measures the
@@ -38,9 +40,16 @@ T9 found one real bug, fixed in `c1747c1`: a due liquidity add preempted the hol
 every step, so holders were never paid once the launch graduated. Now payouts take every other
 step when both are due.
 
-Not measured: compute units per step (the test passes under the harness's 1.4M budget with no
-figure recorded) and the 64-instruction trace with 8 payout entries plus the keeper's real
-account set (the test passes 3 holders).
+Measured in T9 (eight holders in the payout weeks, `cargo test -- --nocapture`):
+
+| Step | Compute units | Instructions in the trace (limit 64) | Max CPI height (limit 5) |
+|---|---|---|---|
+| dip buy | 293,999 | 17 | 5 |
+| liquidity add (buy, wrap, add) | 296,909 | 21 | 5 |
+| measuring step, 8 touches | 415,667 | 37 | 4 |
+| paying step, 8 payouts | 414,282 | 39 | 4 |
+
+All within the keeper's budget (Bordrless cranks steps with about 600,000 CU per the SDK page).
 
 To reproduce: install the Solana CLI (`sh -c "$(curl -sSfL https://release.anza.xyz/stable/install)"`),
 build the Bordrless programs into `ref/bordrless-programs/target/deploy` (the loop in
@@ -115,8 +124,10 @@ the base transfer into the vault (which runs the token hook's `before_transfer`)
   budget (the holder pile at the round's first step) by its share of the total measured the
   round before. The first round measures only; payouts start in week two. A holding under 6
   hours is touched (counted 0) so it is not brought again that week. At most 8 entries a step.
-- Locked liquidity: every other step after graduation, a tranche of 1/48 of the liquidity pile
-  (at least 0.002 SOL, at most twice the buy cap). The coins held (never the dev bag, read from
+- Locked liquidity: at most one add per 10 minutes after graduation (yielding every other step
+  to holder payouts when both are due), a tranche of 1/24 of the liquidity pile (about 4 hours a
+  pile; at least 0.002 SOL, at most twice the buy cap). An add the DEX would mint no LP for is
+  skipped, not attempted. The coins held (never the dev bag, read from
   `Companion.dev_tokens - dev_released`) pair with the tranche at the pool's exact ratio; only
   when they are worth less than the tranche does part of it buy more first. LP minted into
   `Launch.lp_holding`. Coins not paired stay held for the next add. `mintWritable` is false:
@@ -140,10 +151,20 @@ the base transfer into the vault (which runs the token hook's `before_transfer`)
 3. Keep the never-sold bonus at 10%, change it, or drop it.
 4. Payout terms in `keeper.json`: stepBps 2000, holdingBps 10000, windowBps 10000, windowSecs
    86400. These bound the companion's checks only; the script's own piles are the real limit.
-5. Whether to install the Solana toolchain here (about 5.4 GB) to build SBF and run T9.
 6. Quote tokens: upstream `bordrless-programs` shipped "coins launched against SPL Token or
    Token-2022 mints" on 2026-10-20 (commit d31557a, after the pin). This build assumes native SOL
    quotes (`launch.is_native()` required). A stock- or basket-quoted launch would need a new pass.
+
+## Review findings (2026-10-21, independent pass over commits through 091dc22)
+
+Fixed: double pay by moving coins (round-start rule); a sender omitting a holder's wallet
+(skip, not touch); the liquidity buy could exceed the pool cap below the least buy (skipped);
+an add the DEX would refuse (`DepositTooSmall`) blocking every later add (skipped when the LP
+would be 0); the "holders waiting" check matched the pool's own vault (now the payout loop's
+filter); a repeated or read-only holding failing the whole step (skipped); dust holdings in
+the keeper slots (`minBalance`); LP pace 24 adds per pile; stale `dist/` (regenerated).
+Open, flagged above: the registry's two fixed keys (LiquidityTek precedent, unconfirmed by the
+rule text); `record_payout` as a state-writing instruction the AI reading may mark.
 
 ## Known risks and what is unverified
 
@@ -165,7 +186,16 @@ the base transfer into the vault (which runs the token hook's `before_transfer`)
   (swap + wrap + add). Not measured here.
 - `keeper.json` passed `tools/scan_rules.py` only; the SDK's `checkKeeperJson` was not run (no
   node install of the SDK here).
-- All of the above is host-tested logic. No LiteSVM run, no trading test, no mainnet.
+- T9 builds the step's account list by hand from the swap and add instructions; whether
+  Bordrless's keeper passes the same set (the wrap and add accounts) is unverified until a launch.
+- Two design effects for the owner: every step's bounty comes out of the dip pile first; in a long
+  decline the dip rule wins every step, which delays payouts and liquidity adds.
+- A holder's own liquidity add (a transfer into the pool) sets its sold flag and costs the
+  never-sold bonus. An established holder who tops up a large old holding barely moves its clock
+  and so can sell within 10 minutes without the brake: the spec's own averaging rule.
+- `keeper.json` `minBalance` is 1,000,000,000 base units (1,000 coins at the launchpad's 6
+  decimals) so dust holdings cannot fill the 8 slots a step brings.
+- No Workshop trading test, no mainnet.
 
 ## How to reproduce
 

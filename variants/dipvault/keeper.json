@@ -1,7 +1,7 @@
 {
   "version": 1,
   "holdings": {
-    "minBalance": "1",
+    "minBalance": "1000000000",
     "maxBalance": null,
     "hookData": {
       "offset": 1,

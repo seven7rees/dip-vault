@@ -1,7 +1,7 @@
 //! T17 — Dip Vault script: the weekly holder payouts (DIP-VAULT.md item 5): weights, rounds,
 //! what a holding is due, and that a wallet that sells before 6 hours earns nothing.
 
-use dipvault_script::holders::{due, roll, round_of, Round};
+use dipvault_script::holders::{due, held_since_round_start, roll, round_of, round_start, Round};
 use dipvault_script::params::{MIN_HOLD_SECS, MIN_PAYOUT_LAMPORTS, NEVER_SOLD_BONUS_BPS, ROUND_SECS};
 use dipvault_script::record::{tier_bps, weight, Record, FLAG_SOLD};
 
@@ -136,4 +136,19 @@ fn a_wallet_that_sells_everything_before_six_hours_earns_nothing() {
     assert_eq!(weight(&cleared, 0, NOW), 0);
     let r = Round { round: 1, w_prev: 100, w_cur: 0, budget: 1_000_000, paid: 0, measured: 0 };
     assert_eq!(due(&r, weight(&cleared, 0, NOW), 1_000_000, u64::MAX, u64::MAX), 0);
+}
+
+#[test]
+fn only_coins_held_since_before_the_round_began_count() {
+    // Review finding (2026-10-21): coins moved to a fresh wallet mid-week restart their clock and
+    // their round, so without this rule they could be paid again the same week.
+    let r = round_of(NOW, ROUND_SECS);
+    let start = round_start(r, ROUND_SECS);
+    assert_eq!(start, i64::from(r) * WEEK);
+    assert!(held_since_round_start(start, r, ROUND_SECS), "a clock at the round's first second counts");
+    assert!(held_since_round_start(start - 1, r, ROUND_SECS));
+    assert!(!held_since_round_start(start + 1, r, ROUND_SECS), "a clock started this week waits for next week");
+    assert!(held_since_round_start(start + 1, r + 1, ROUND_SECS), "and counts next week");
+    assert!(held_since_round_start(i64::MIN, u32::MAX, ROUND_SECS), "no overflow");
+    assert!(!held_since_round_start(i64::MAX, 0, ROUND_SECS));
 }

@@ -56,6 +56,18 @@ pub fn pairing(
     Some((b, q2.min(quote_budget)))
 }
 
+/// The LP the DEX mints for a pull of `base` and `quote` on a pool of these reserves and LP
+/// supply: `min(base * supply / base_reserve, quote * supply / quote_reserve)`, rounded down
+/// (`bordrless-core` `lp_for_deposit`); 0 on an empty side.
+pub fn lp_for(base: u64, quote: u64, base_reserve: u64, quote_reserve: u64, lp_supply: u64) -> u64 {
+    if base_reserve == 0 || quote_reserve == 0 || lp_supply == 0 {
+        return 0;
+    }
+    let by_base = u128::from(base) * u128::from(lp_supply) / u128::from(base_reserve);
+    let by_quote = u128::from(quote) * u128::from(lp_supply) / u128::from(quote_reserve);
+    u64::try_from(by_base.min(by_quote)).unwrap_or(u64::MAX)
+}
+
 /// The pool's LP mint: `["lp", pool]` under the DEX.
 pub fn lp_mint_address(pool: &Pubkey) -> Pubkey {
     Pubkey::find_program_address(&[b"lp", pool.as_ref()], &DEX_ID).0
