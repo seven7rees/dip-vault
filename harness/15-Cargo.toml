@@ -1,0 +1,45 @@
+# Harness for moon-wick: host tests T1-T8 (SPEC § 5).
+# Independent workspace; compiles without the Solana/SBF toolchain.
+#
+# The SPEC calls for git deps pinned to rev c6676977.  [patch] redirects those
+# git deps to the local ref/ mirror, which is byte-for-byte identical.
+# This avoids network access and makes the build reproducible offline.
+
+[workspace]
+members = ["."]
+
+[package]
+name    = "moon-wick-harness"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "moon_wick_harness"
+path = "src/lib.rs"
+
+[dev-dependencies]
+# ── Our crates under test ────────────────────────────────────────────────────
+my-hook         = { path = "../hook",   features = ["no-entrypoint"] }
+workshop-script = { path = "../script", features = ["no-entrypoint"] }
+
+# ── Bordrless programs: git deps as the SPEC requires, patched to local below ─
+bordrless-companion = { git = "https://github.com/BordrlessDex/bordrless-programs", rev = "c6676977ddc71357c15a2af7d68e04bb095e23a2", features = ["no-entrypoint"] }
+bordrless-strategy  = { git = "https://github.com/BordrlessDex/bordrless-programs", rev = "c6676977ddc71357c15a2af7d68e04bb095e23a2" }
+bordrless-core      = { git = "https://github.com/BordrlessDex/bordrless-programs", rev = "c6676977ddc71357c15a2af7d68e04bb095e23a2" }
+bordrless-swap      = { git = "https://github.com/BordrlessDex/bordrless-programs", rev = "c6676977ddc71357c15a2af7d68e04bb095e23a2", features = ["no-entrypoint"] }
+
+anchor-lang = "=1.2.0"
+
+# ── Redirect all bordrless git deps to the local ref/ mirror @ c6676977 ──────
+[patch."https://github.com/BordrlessDex/bordrless-programs"]
+bordrless-companion = { path = "../ref/bordrless-programs/programs/bordrless_companion" }
+bordrless-strategy  = { path = "../ref/bordrless-programs/crates/bordrless-strategy"   }
+bordrless-core      = { path = "../ref/bordrless-programs/crates/bordrless-core"       }
+bordrless-hook      = { path = "../ref/bordrless-programs/crates/bordrless-hook"       }
+bordrless-game      = { path = "../ref/bordrless-programs/crates/bordrless-game"       }
+bordrless-token     = { path = "../ref/bordrless-programs/programs/bordrless_token"    }
+bordrless-swap      = { path = "../ref/bordrless-programs/programs/bordrless_swap"     }
+bordrless-launch    = { path = "../ref/bordrless-programs/programs/bordrless_launch"   }
+bordrless-kit       = { path = "../ref/bordrless-programs/programs/bordrless_kit"      }
+bordrless-bridge    = { path = "../ref/bordrless-programs/programs/bordrless_bridge"   }
