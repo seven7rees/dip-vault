@@ -1,0 +1,83 @@
+{
+  "version": 1,
+  "holdings": {
+    "minBalance": "1",
+    "maxBalance": null,
+    "hookData": {
+      "offset": 1,
+      "width": 4,
+      "compare": "ne",
+      "against": {
+        "epoch": {
+          "secs": 604800,
+          "fieldUnitSecs": null
+        }
+      }
+    },
+    "payTo": "owner",
+    "perStep": {
+      "withSwapAccounts": 8,
+      "withoutSwapAccounts": null
+    }
+  },
+  "swapAccounts": true,
+  "hookAccounts": false,
+  "mintWritable": true,
+  "payouts": true,
+  "wallets": [
+    "AxoN4hpQJWKFkSimhqnA7dUsqf5VGojA5RhhZTiP4KFm"
+  ],
+  "stepSecs": 300,
+  "stateLen": 320,
+  "payoutTerms": {
+    "stepBps": 2000,
+    "holdingBps": 10000,
+    "windowBps": 10000,
+    "windowSecs": 86400
+  },
+  "launcherShareBps": 5000,
+  "view": [
+    {
+      "label": "Dip pile",
+      "account": "script",
+      "offset": 57,
+      "width": 8,
+      "as": "lamports"
+    },
+    {
+      "label": "Holder pile",
+      "account": "script",
+      "offset": 65,
+      "width": 8,
+      "as": "lamports"
+    },
+    {
+      "label": "Liquidity pile",
+      "account": "script",
+      "offset": 73,
+      "width": 8,
+      "as": "lamports"
+    },
+    {
+      "label": "Paid to holders",
+      "account": "script",
+      "offset": 193,
+      "width": 8,
+      "as": "lamports"
+    },
+    {
+      "label": "Coins burned",
+      "account": "script",
+      "offset": 89,
+      "width": 8,
+      "as": "tokens"
+    },
+    {
+      "label": "Liquidity locked (SOL)",
+      "account": "script",
+      "offset": 201,
+      "width": 8,
+      "as": "lamports"
+    }
+  ]
+}

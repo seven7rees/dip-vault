@@ -1,6 +1,8 @@
 # Dip Vault - design spec + partial implementation (private review copy)
 
-Status: design finalized (DIP-VAULT.md, v5, 2026-10-18); implementation PARTIAL.
+Status: design finalized (DIP-VAULT.md, v5, 2026-10-18); implementation COMPLETE on the host
+(2026-10-21, see DIP-VAULT-BUILD.md): hook + script written, compiled, 161 host tests pass,
+rule scan clean. NOT built with the SBF toolchain, NOT run in LiteSVM, NOT submitted.
 Not submitted, not on chain, not audited. Nothing in this repo is live.
 
 ## What is implemented
@@ -20,9 +22,10 @@ Not submitted, not on chain, not audited. Nothing in this repo is live.
 - `SPEC.md`, `SUBMIT_DIP.md` - base engine spec and the DIP companion build
   spec/status. Where they and DIP-VAULT.md disagree, DIP-VAULT.md wins.
 
-## What is NOT implemented
+## Implemented 2026-10-21 (was NOT implemented)
 
-The Dip Vault hook core from DIP-VAULT.md does not exist yet:
+All of the following now exist in `hook_variants/dipvault/` and `script_variants/dipvault/`,
+with host tests `harness/tests/t15..t19`. Open decisions and risks: DIP-VAULT-BUILD.md.
 
 - per-wallet hold clock (weighted-average entry time)
 - 1% sell brake while the hold clock is under 10 minutes

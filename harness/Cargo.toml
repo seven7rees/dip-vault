@@ -22,6 +22,13 @@ path = "src/lib.rs"
 # ── Our crates under test ────────────────────────────────────────────────────
 my-hook         = { path = "../hook",   features = ["no-entrypoint"] }
 workshop-script = { path = "../script", features = ["no-entrypoint"] }
+dipvault-hook   = { path = "../hook_variants/dipvault",   features = ["no-entrypoint"] }
+dipvault-script = { path = "../script_variants/dipvault", features = ["no-entrypoint"] }
+bordrless-token  = { git = "https://github.com/BordrlessDex/bordrless-programs", rev = "c6676977ddc71357c15a2af7d68e04bb095e23a2", features = ["no-entrypoint"] }
+bordrless-bridge = { git = "https://github.com/BordrlessDex/bordrless-programs", rev = "c6676977ddc71357c15a2af7d68e04bb095e23a2", features = ["no-entrypoint"] }
+bordrless-launch = { git = "https://github.com/BordrlessDex/bordrless-programs", rev = "c6676977ddc71357c15a2af7d68e04bb095e23a2", features = ["no-entrypoint"] }
+bordrless-game   = { git = "https://github.com/BordrlessDex/bordrless-programs", rev = "c6676977ddc71357c15a2af7d68e04bb095e23a2" }
+bordrless-hook   = { git = "https://github.com/BordrlessDex/bordrless-programs", rev = "c6676977ddc71357c15a2af7d68e04bb095e23a2" }
 
 # ── Bordrless programs: git deps as the SPEC requires, patched to local below ─
 bordrless-companion = { git = "https://github.com/BordrlessDex/bordrless-programs", rev = "c6676977ddc71357c15a2af7d68e04bb095e23a2", features = ["no-entrypoint"] }

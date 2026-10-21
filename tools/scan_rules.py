@@ -108,8 +108,9 @@ def scan_half(root: Path, hook: bool, problems: list):
 # keeper.json: the SDK's validator (shared/src/keeper.ts) allows ROOT_KEYS; the live docs
 # (bordrless.app/sdk/companions) add the three LIVE_KEYS. Ranges are the companion's.
 ROOT_KEYS = {"version", "holdings", "swapAccounts", "hookAccounts", "payouts", "roundSecs", "wallets", "stepSecs", "stateLen", "initData"}
-LIVE_KEYS = {"mintWritable", "payoutTerms", "launcherShareBps"}
+LIVE_KEYS = {"mintWritable", "payoutTerms", "launcherShareBps", "view", "pools"}
 STATE_LEN = 128  # 8-byte discriminator + ScriptState::INIT_SPACE (120); T7 and T8 pin the same number
+STATE_LENS = {"dipvault": 320}  # pairs with their own state layout (T19 pins it)
 B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 
 
@@ -138,7 +139,7 @@ def is_pubkey(s) -> bool:
     return lead + len(body) == 32
 
 
-def check_keeper(path: Path, problems: list):
+def check_keeper(path: Path, problems: list, state_len: int = STATE_LEN):
     try:
         k = json.loads(path.read_text())
     except ValueError as e:
@@ -168,8 +169,8 @@ def check_keeper(path: Path, problems: list):
     sl = k.get("stateLen")
     if sl is not None and not (is_int(sl) and 0 <= sl <= 10_240):
         problems.append(f"{path}: stateLen must be 0 to 10,240")
-    if sl != STATE_LEN:
-        problems.append(f"{path}: stateLen {sl} is not the ScriptState account size {STATE_LEN}")
+    if sl != state_len:
+        problems.append(f"{path}: stateLen {sl} is not the ScriptState account size {state_len}")
     pt = k.get("payoutTerms")
     if pt is not None:
         ok = isinstance(pt, dict) and set(pt) == {"stepBps", "holdingBps", "windowBps", "windowSecs"}
@@ -208,7 +209,7 @@ def main():
             elif kj.stat().st_size > KEEPER_MAX:
                 problems.append(f"{kj}: over {KEEPER_MAX} bytes")
             else:
-                check_keeper(kj, problems)
+                check_keeper(kj, problems, STATE_LENS.get(variant.name, STATE_LEN))
             if not (script / "src" / "lib.rs").is_file():
                 problems.append(f"{script}: src/lib.rs missing")
         print(f"{variant.name}: scanned")
