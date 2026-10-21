@@ -79,7 +79,7 @@ pub struct BuilderStep {
 }
 
 /// The builder scale: 1% under 5 SOL of real pool SOL, 2.5% from 5, 5% from 20, 7.5% from 50,
-/// 10% from 100 SOL. (Proposed; the owner sets the final steps.)
+/// 10% from 100 SOL. Owner-approved 2026-10-21.
 pub const BUILDER_SCALE: [BuilderStep; 5] = [
     BuilderStep { from_lamports: 0, bps: 100 },
     BuilderStep { from_lamports: 5_000_000_000, bps: 250 },
@@ -118,7 +118,7 @@ pub const WEIGHT_TIERS: [WeightTier; 3] = [
     WeightTier { from_secs: 2_592_000, bps: 20_000 },
 ];
 /// A holding that has not sold into the pool since it was funded weighs this much more, in basis
-/// points of its weight: 10%. Set to 0 to turn the bonus off.
+/// points of its weight: 10%. Owner-approved 2026-10-21. Set to 0 to turn the bonus off.
 pub const NEVER_SOLD_BONUS_BPS: u16 = 1_000;
 /// The most holdings one step pays or measures (the companion pays at most 10 a step; the keeper
 /// brings at most `perStep` of keeper.json: 1, what fits one transaction beside the swap and

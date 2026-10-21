@@ -152,8 +152,8 @@ the base transfer into the vault (which runs the token hook's `before_transfer`)
   slot matches, else the signer's holding. Test: T15 "a young holding sold through an old dust
   delegate still pays the brake".
 - Author share 0: a submission choice, not code. `keeper.json` `launcherShareBps` 5000.
-- Builder cut 1-10% by pool real SOL: `params::BUILDER_SCALE`, PROPOSED steps 1% under 5 SOL,
-  2.5% from 5, 5% from 20, 7.5% from 50, 10% from 100 SOL. The owner sets the final steps.
+- Builder cut 1-10% by pool real SOL: `params::BUILDER_SCALE`, 1% under 5 SOL, 2.5% from 5,
+  5% from 20, 7.5% from 50, 10% from 100 SOL. APPROVED by the owner 2026-10-21 (chat).
 - Pot thirds after the builder cut: 3,333 / 3,333 / 3,334 bps (`params`), kept as four piles
   in the script state that always add up to the pot (`math::Piles`, `reconcile`; T16 runs 5,000
   random steps and checks every lamport in equals every lamport out plus the pot).
@@ -187,14 +187,15 @@ the base transfer into the vault (which runs the token hook's `before_transfer`)
 ## Additive items (owner approved "additive gamification", 2026-10-21)
 
 - `NEVER_SOLD_BONUS_BPS = 1_000`: a holding that never sold into the pool since it was funded
-  weighs 10% more. One constant; 0 turns it off. Not in DIP-VAULT.md v5.
+  weighs 10% more. One constant; 0 turns it off. Not in DIP-VAULT.md v5; APPROVED by the owner
+  2026-10-21 (chat).
 - No burn anywhere (owner decision 2026-10-21). The hook keeps `before_burn` so a holder's own
   burn still cuts their record.
 
 ## Open decisions for the owner
 
-1. The builder scale steps (proposed above).
-3. Keep the never-sold bonus at 10%, change it, or drop it.
+1. The builder scale steps: APPROVED 2026-10-21.
+3. The never-sold bonus at 10%: APPROVED 2026-10-21.
 4. Payout terms in `keeper.json`: stepBps 2000, holdingBps 10000, windowBps 10000, windowSecs
    86400. These bound the companion's checks only; the script's own piles are the real limit.
 6. Quote tokens: upstream `bordrless-programs` shipped "coins launched against SPL Token or
