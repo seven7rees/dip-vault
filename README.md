@@ -3,16 +3,17 @@
 Status: design finalized (DIP-VAULT.md, v5, 2026-10-18); implementation PARTIAL.
 Not submitted, not on chain, not audited. Nothing in this repo is live.
 
-## What is implemented and tested
+## What is implemented
 
 - `script/` - the dip-buy companion (FUEL-era engine, DIP constants in
   `variants/fuel2/`). Buys only when the pool price is 8%+ under its own tracked
   reference, at most one buy per 5 minutes, capped at 1% of the pool's real SOL
   per buy, bought tokens burned. This is the "dip-buy third" of the Dip Vault
   design.
-- `harness/` - host test suite T1-T14 for the engine (LiteSVM-based). T9, the
-  full LiteSVM run of the real `companion_step`, has never been run and is the
-  biggest open test gap (needs the Solana toolchain and about 5.4 GB disk).
+- `harness/` - host test suite T1-T14 for the engine (LiteSVM-based),
+  included but not yet executed in this environment. T9, the full LiteSVM run
+  of the real `companion_step`, has never been run and is the biggest open
+  test gap (needs the Solana toolchain and about 5.4 GB disk).
 - `hook/` - the MOON/WICK quote-cut hook. This is the engine reference, NOT the
   Dip Vault hook.
 - `tools/` - dip tuning and economics simulators used to set the constants.
