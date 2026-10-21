@@ -153,3 +153,20 @@ public repos github.com/BordrlessDex/bordrless-programs and bordrless-sdk.
 - When implementation is complete and tested, hand back for review BEFORE anything
   resembling submission. Deployment and Workshop submission are Patrick-approved steps,
   always.
+
+## 9. Promotional asset (simulated video)
+
+- `art/promo/dipvault-launch-video-coins.mp4` (21s, 1080x1080): a SIMULATED
+  first-hour replay - brake window, dip buys + burns, LP locks, a clock jump to
+  6h, then a holder payout. Frames are labeled "SIMULATION - EXAMPLE LAUNCH"
+  with "Simulated. Modeled numbers, not on-chain data." disclaimers.
+- It is NOT evidence of live operation and must never be presented as such.
+- Before ANY promotional use, verify every behavior, number and line of copy it
+  shows against the finished, tested implementation - the "1% for 10 min, then
+  0%" brake, "dip buys at -8% vs average, burned", "pot thirds", "50% launcher,
+  50% pot", "builder: 1-10% of the pot", and the weekly payout cadence. If the
+  shipped design differs in any way, the video gets regenerated or cut -
+  Patrick decides.
+- Patrick's hope: if Bordrless launches or promotes Dip Vault, they credit and
+  tag @TetonTrading. That is a request Patrick would make, not anything
+  Bordrless has agreed to. Do not contact Bordrless about it.
