@@ -20,8 +20,8 @@ build addresses; the builder writes the real ones.
 A hold clock in every holding (weighted-average entry time, written by before_transfer). The hook
 answers 80 bps on a sell only while the seller's clock is under 10 minutes, 0 after, 0 on buys; a
 sell's real source clock is relayed through the hook state so a delegate sale cannot dodge it. The
-companion script keeps the pot in four piles that always equal the pot: the builder's 1 to 10% by
-pool SOL; dip buys (8% under its own reference, 1% of the pool, 5-minute cooldown; coins kept);
+companion script keeps the pot in four piles that always equal the pot: the builder's fifth of
+new pot money; dip buys (8% under its own reference, 1% of the pool, 5-minute cooldown; coins kept);
 weekly holder payouts through the companion's payout answer (the hook's record_payout records
 them; weights 1x/1.5x/2x by hold time, +10% never sold; a holding counts if held since before the
 week began; paid the week after it is measured, by the measured basis, so shares never exceed the
@@ -56,5 +56,5 @@ the launch's own LP holding, as LiquidityTek does).
 
 ## Owner decisions already made
 
-Builder scale 1/2.5/5/7.5/10% at 0/5/20/50/100 SOL of pool SOL; never-sold bonus 10%; no burn
+Builder's share a fifth of new pot money (LiquidityTek's rate); never-sold bonus 10%; no burn
 anywhere; launcher share 5,000 bps; payout terms open (the script's own piles bound every payout).

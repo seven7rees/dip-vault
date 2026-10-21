@@ -2,8 +2,8 @@
 //!
 //! Every step (the companion calls it with the creator address signing):
 //!   1. Check the launch, the hook setup and the companion account; read the pot and the pool.
-//!   2. Split the pot's new money: the builder's share scales with the pool's real SOL
-//!      (`params::BUILDER_SCALE`, 1% to 10%); the rest goes in three equal piles: dip buys,
+//!   2. Split the pot's new money: the builder's share (`params::BUILDER_SCALE`, a fifth); the
+//!      rest goes in three equal piles: dip buys,
 //!      holder payouts, locked liquidity. The four piles always add up to the pot.
 //!   3. Roll the weekly payout round when a new one has begun.
 //!   4. Do one thing, in this order of preference:

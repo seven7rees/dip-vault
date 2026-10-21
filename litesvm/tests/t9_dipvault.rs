@@ -352,11 +352,10 @@ fn t9_the_whole_story() {
     let paid: ScriptWalletPayout = tx.event();
     assert_eq!(paid.to, BUILDER_WALLET);
     assert_eq!(w.env.lamports(&BUILDER_WALLET) - builder_before, paid.lamports);
-    // The split, exactly: the pool holds under 5 SOL of real SOL, so the builder's share is 1%;
-    // the rest in 3,333 / 3,333 / 3,334; the step's bounty (2,500 for a one-entry answer) comes
-    // out of the dip pile; the builder is paid what the terms allow of what is owed.
-    assert!(w.launch_pool(&mint).quote_reserve < 5 * SOL);
-    let builder = pot0 * 100 / 10_000;
+    // The split, exactly: the builder's share (a fifth); the rest in 3,333 / 3,333 / 3,334; the
+    // step's bounty (2,500 for a one-entry answer) comes out of the dip pile; the builder is paid
+    // what the terms allow of what is owed.
+    let builder = pot0 * u64::from(dipvault_script::math::builder_bps(w.launch_pool(&mint).quote_reserve)) / 10_000;
     let rest = pot0 - builder;
     let dip = (rest as u128 * u128::from(DIP_THIRD_BPS) / 10_000) as u64;
     let holders_share = (rest as u128 * u128::from(HOLDER_THIRD_BPS) / 10_000) as u64;
@@ -396,7 +395,8 @@ fn t9_the_whole_story() {
     // The dip pile paid for exactly the buy: the pile grew by its third of the new money, then
     // lost the SOL spent and the step's flat bounty (no answer on a trading step).
     let new_money = pot_before_dip - s1.last_pot;
-    let dip_share = ((new_money - new_money * 100 / 10_000) as u128 * u128::from(DIP_THIRD_BPS) / 10_000) as u64;
+    let builder_bps = u64::from(dipvault_script::math::builder_bps(real_sol_before));
+    let dip_share = ((new_money - new_money * builder_bps / 10_000) as u128 * u128::from(DIP_THIRD_BPS) / 10_000) as u64;
     // The bounty: a flat 20,000 on a step with no answer, 2,500 when it also paid the builder.
     let bounty = if tx.events::<ScriptWalletPayout>().is_empty() { SCRIPT_BOUNTY } else { SCRIPT_BOUNTY / 8 };
     let spent = s1.dip_pile + dip_share - bounty - s2.dip_pile;

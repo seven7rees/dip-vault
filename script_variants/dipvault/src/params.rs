@@ -1,7 +1,7 @@
 //! The numbers this script runs on. Every setting is a named constant here and nowhere else.
 //!
 //! Dip Vault: the pot (the companion fee plus the hook's 1% brake) is split every step. The
-//! builder's share scales with the pool's real SOL (`BUILDER_SCALE`); the rest goes in three equal
+//! builder's share is a fifth of new pot money (`BUILDER_SCALE`); the rest goes in three equal
 //! parts to the dip buys (the coins bought are kept for liquidity, never burned), the weekly
 //! holder payouts and the locked liquidity adds, which pair the coins held with SOL.
 
@@ -69,7 +69,7 @@ pub const PARAMS: Params = Params {
 pub const BUILDER_WALLET: Pubkey =
     Pubkey::from_str_const("AxoN4hpQJWKFkSimhqnA7dUsqf5VGojA5RhhZTiP4KFm");
 
-// ─── The builder's share: 1% to 10% of new pot money, by the pool's real SOL ─────────────────
+// ─── The builder's share of new pot money ────────────────────────────────────────────────────
 
 /// One step of the builder scale: from this many lamports of real SOL in the pool, this share of
 /// new pot money, in basis points. Steps are in rising order; the first starts at 0.
@@ -78,18 +78,12 @@ pub struct BuilderStep {
     pub bps: u16,
 }
 
-/// The builder scale: 1% under 5 SOL of real pool SOL, 2.5% from 5, 5% from 20, 7.5% from 50,
-/// 10% from 100 SOL. Owner-approved 2026-10-21.
-pub const BUILDER_SCALE: [BuilderStep; 5] = [
-    BuilderStep { from_lamports: 0, bps: 100 },
-    BuilderStep { from_lamports: 5_000_000_000, bps: 250 },
-    BuilderStep { from_lamports: 20_000_000_000, bps: 500 },
-    BuilderStep { from_lamports: 50_000_000_000, bps: 750 },
-    BuilderStep { from_lamports: 100_000_000_000, bps: 1_000 },
-];
+/// The builder's share of new pot money: a fifth, at every pool depth (LiquidityTek's rate, the
+/// owner's floor 2026-10-21; the scale stays so a depth-dependent rate is one table edit).
+pub const BUILDER_SCALE: [BuilderStep; 1] = [BuilderStep { from_lamports: 0, bps: 2_000 }];
 
 /// The most the builder scale ever answers: its last step.
-pub const BUILDER_MAX_BPS: u16 = 1_000;
+pub const BUILDER_MAX_BPS: u16 = 2_000;
 
 // ─── The three thirds of what is left after the builder's share ─────────────────────────────
 

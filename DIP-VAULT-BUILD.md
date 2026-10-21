@@ -15,7 +15,7 @@ Not audited.
 | SBF build (`cargo build-sbf --tools-version v1.57 --arch v3`) | COMPILED (owner approved the toolchain install 2026-10-21; solana-cli 4.3.1, platform-tools v1.57) | `target-sbf/dipvault_hook.so` 200 KB, `dipvault_script.so` 220 KB |
 | T9: the real `companion_step` in LiteSVM, the whole story (`litesvm/tests/t9_dipvault.rs`) | TEST-EXECUTED, passes twice: against the programs built from the pinned source AND against the live mainnet program bytes (`solana program dump`, 2026-10-21) | `cd litesvm && cargo test`, then the same with `SBF_OUT_DIR=../ref/bordrless-programs/target/deploy-mainnet` |
 | Workshop trading test, reading, approval | NOT DONE | needs a submission, which is the owner's step |
-| Binaries at this commit | `target-sbf/dipvault_hook.so` sha256 579ef9886d728e9e12c13a39c5dcdc79648cdc0bf503c25954163569fe989b15; `dipvault_script.so` b062d0a94f6ca209643a86dae2c6cef992a66d077ce99eadf3bcf82f215042df | rebuilt from the committed source before the T9 runs recorded below |
+| Binaries at this commit | `target-sbf/dipvault_hook.so` sha256 579ef9886d728e9e12c13a39c5dcdc79648cdc0bf503c25954163569fe989b15; `dipvault_script.so` 8ac6efb456be2a040ddf5addffe73b9f28ee9195237dfd2120370a1077ef93d5 (after the fifth) | rebuilt from the committed source before the T9 runs recorded below |
 
 ## T9: what the LiteSVM run proves (2026-10-21, after the package review)
 
@@ -152,8 +152,12 @@ the base transfer into the vault (which runs the token hook's `before_transfer`)
   slot matches, else the signer's holding. Test: T15 "a young holding sold through an old dust
   delegate still pays the brake".
 - Author share 0: a submission choice, not code. `keeper.json` `launcherShareBps` 5000.
-- Builder cut 1-10% by pool real SOL: `params::BUILDER_SCALE`, 1% under 5 SOL, 2.5% from 5,
-  5% from 20, 7.5% from 50, 10% from 100 SOL. APPROVED by the owner 2026-10-21 (chat).
+- Builder cut: a fifth of new pot money at every depth (`params::BUILDER_SCALE`, one step):
+  LiquidityTek's rate, the owner's floor (chat, 2026-10-21, "do what liquidity tek is doing at
+  bare minimum", "approved those changes"; this replaces the 1-10% scale approved earlier the
+  same day). The wallet stays named in the script and keeper.json: that is how the companion
+  pays a wallet, and how LiquidityTek does it. Author share at the Workshop stays 0. The owner
+  asked that the cut not appear on the graphic; the listing words state it.
 - Pot thirds after the builder cut: 3,333 / 3,333 / 3,334 bps (`params`), kept as four piles
   in the script state that always add up to the pot (`math::Piles`, `reconcile`; T16 runs 5,000
   random steps and checks every lamport in equals every lamport out plus the pot).
@@ -194,7 +198,7 @@ the base transfer into the vault (which runs the token hook's `before_transfer`)
 
 ## Open decisions for the owner
 
-1. The builder scale steps: APPROVED 2026-10-21.
+1. The builder's share: a fifth, flat (2026-10-21). Scaling above it is one table edit.
 3. The never-sold bonus at 10%: APPROVED 2026-10-21.
 4. Payout terms in `keeper.json`: stepBps 2000, holdingBps 10000, windowBps 10000, windowSecs
    86400. These bound the companion's checks only; the script's own piles are the real limit.
@@ -263,4 +267,4 @@ rule text); `record_payout` as a state-writing instruction the AI reading may ma
     python3 -I tools/scan_rules.py dist # clean
 
 Submission files: `dist/dipvault/hook/src/*.rs` + `hook.json`; `dist/dipvault/script/src/*.rs` +
-`keeper.json`; words in `variants/dipvault/notes.txt` (595 chars). The owner submits.
+`keeper.json`; words in `variants/dipvault/notes.txt` (598 chars). The owner submits.

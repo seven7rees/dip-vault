@@ -16,33 +16,30 @@ impl Xorshift64 {
 const SOL: u64 = 1_000_000_000;
 
 #[test]
-fn the_builder_scale_is_1_to_10_percent_rising_with_pool_sol() {
-    assert_eq!(builder_bps(0), 100, "1% on an empty pool");
-    assert_eq!(builder_bps(5 * SOL - 1), 100);
-    assert_eq!(builder_bps(5 * SOL), 250);
-    assert_eq!(builder_bps(20 * SOL), 500);
-    assert_eq!(builder_bps(50 * SOL), 750);
-    assert_eq!(builder_bps(100 * SOL), 1_000, "10% from 100 SOL");
-    assert_eq!(builder_bps(u64::MAX), 1_000);
+fn the_builder_share_is_a_fifth_at_every_depth() {
+    // LiquidityTek's rate, the owner's floor (2026-10-21): 20% of new pot money whatever the pool.
+    for q in [0, SOL, 5 * SOL, 100 * SOL, u64::MAX] {
+        assert_eq!(builder_bps(q), 2_000);
+    }
     assert_eq!(BUILDER_MAX_BPS, BUILDER_SCALE[BUILDER_SCALE.len() - 1].bps);
+    assert_eq!(BUILDER_SCALE[0].from_lamports, 0);
     let mut last = (0u64, 0u16);
     for s in BUILDER_SCALE.iter() {
         assert!(s.from_lamports >= last.0 && s.bps >= last.1, "steps rise");
-        assert!(s.bps >= 100 && s.bps <= 1_000, "1% to 10%");
+        assert!(s.bps <= 10_000);
         last = (s.from_lamports, s.bps);
     }
-    assert_eq!(BUILDER_SCALE[0].from_lamports, 0);
 }
 
 #[test]
 fn the_thirds_add_up() {
     assert_eq!(u32::from(DIP_THIRD_BPS) + u32::from(HOLDER_THIRD_BPS) + u32::from(LP_THIRD_BPS), 10_000);
     let mut p = Piles::default();
-    p.split(1_000_000, 1_000);
-    assert_eq!(p.owed, 100_000, "10% to the builder");
-    assert_eq!(p.dip, 299_970);
-    assert_eq!(p.holders, 299_970);
-    assert_eq!(p.lp, 300_060, "the liquidity third takes the rounding");
+    p.split(1_000_000, 2_000);
+    assert_eq!(p.owed, 200_000, "20% to the builder");
+    assert_eq!(p.dip, 266_640);
+    assert_eq!(p.holders, 266_640);
+    assert_eq!(p.lp, 266_720, "the liquidity third takes the rounding");
     assert_eq!(p.total(), 1_000_000, "nothing lost");
     let mut q = Piles::default();
     q.split(7, 100);

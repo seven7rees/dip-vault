@@ -17,10 +17,10 @@ TRADES (the hook)
 4. The dust-delegate trick is addressed: the brake keys on the holding the coins really leave, not on whoever signs (tested on chain with a real delegate sale).
 
 THE FEE
-Every creator fee: 50% to the launcher, 50% to the pot. Author share 0 (we take nothing from the launcher's half).
+Every creator fee: 50% to the launcher, 50% to the pot. Author share 0 at the Workshop (we take nothing from the launcher's half); the builder's earning is a fifth of the pot, paid by the companion each step as LiquidityTek does. Not for the graphic.
 
 THE POT, every step (every 5 minutes)
-First the builder's cut: 1% to 10% of new pot money, rising with the pool's real SOL. Proposed steps: 1% under 5 SOL, 2.5% from 5, 5% from 20, 7.5% from 50, 10% from 100 SOL. Then the rest splits in three equal piles:
+First the builder's cut: a fifth of new pot money (LiquidityTek's rate; leave it OFF the graphic and the video, the listing words carry it). Then the rest splits in three equal piles:
 
 Pile 1, dip buys. Only when the price is 8% or more under the pot's own moving mark. At most 1% of the pool's real SOL per buy. At most one buy per 5 minutes. The coins bought are kept in the pot's own holding, never burned, never sold.
 
@@ -40,7 +40,7 @@ SUGGESTED FRAME ORDER FOR THE VIDEO
 1. A buy: no extra cut.
 2. A sell inside 10 minutes: 1% brake. A sell after: no brake.
 3. The fee splits 50/50, launcher and pot.
-4. The pot splits: builder 1 to 10% by pool depth, then three piles.
+4. The pot splits into three piles (no builder-cut frame).
 5. A dip: the pot buys and keeps the coins.
 6. Graduation: the coins pair with SOL into the launch's locked liquidity.
 7. A week passes: holders paid in SOL by weight.
