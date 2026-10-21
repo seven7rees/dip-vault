@@ -1,7 +1,7 @@
 # Dip Vault art
 
 CURRENT PAIR (2026-10-21) - use these:
-- `promo/DIPVAULT-flow-calm-v8.png` - flow graphic, calm palette (greens / blues / purples on deep indigo)
+- `promo/DIPVAULT-flow-calm-v9.png` - flow graphic, calm palette (greens / blues / purples on deep indigo)
 - `promo/dipvault-launch-video-calm-v14.mp4` - 25-second launch video, same palette, gentle coin-clink audio
 
 Both carry the current format from `DIP-VAULT-FORMAT-NOTE.txt` (repo root): the creator fee
@@ -17,5 +17,5 @@ Earlier drafts, superseded, kept for history:
 - `flow/DIPVAULT-flow-dark-v5.png` - old dark palette, pre-revision
 - `logo/dipvault-logo-pink-v6.png` - old pink logo
 - `promo/dipvault-launch-video-coins.mp4` - earlier video cut
-- v7 graphic / v13 video (removed): first fee-revision pass, thirds shown without the
-  builder's cut in the model - do not use
+- v7-v8 graphics / v13 video (removed): v7/v13 showed thirds without the builder's cut in
+  the model; v8 had a mispositioned label - do not use
