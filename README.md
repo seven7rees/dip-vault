@@ -1,6 +1,6 @@
 # Dip Vault (Bordrless hook + companion) - private handoff repo
 
-Status: **design and spec final (v5.1), art final. Implementation not built yet - no code in this repo.**
+Status: **design and spec final (v5.1), art final. Implementation not yet uploaded or reviewed here - laptop source package pending.**
 This repo is the scoped handoff for the Bordrless team. It holds only Dip Vault material.
 
 - `DIP-VAULT.md` - the full spec (v5.1). This is the design contract.
