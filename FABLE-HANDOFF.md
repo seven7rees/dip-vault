@@ -33,6 +33,14 @@ is marked unresolved, STOP and ask Patrick - do not guess on load-bearing choice
   and tooling. Patrick's laptop clone (Claude Desktop folder) was verified on 2026-10-21
   to be byte-identical to GitHub HEAD on every compared source file except an older
   HANDOFF.md. Either copy is a valid starting point.
+- Original laptop upload (Google Drive): Patrick gave Fable's session access to the
+  same Drive folder on 2026-10-21, so no transfer is needed - you may already have it.
+  It holds the moon-wick laptop copy including drafts/ notes and the ref/ third-party
+  mirrors. It is the UNSANITIZED original: 72+ text files were secrets-scanned clean
+  on 2026-10-21, but its .git/ directory was never scanned. Do not share from it;
+  the dip-vault repo is the sanitized handoff copy. Where its docs conflict with
+  section 2, section 2 wins.
+
 - The Dip Vault hook itself IS NOT BUILT anywhere. It does not exist on GitHub, the
   laptop folder, Gmail, or Drive (all checked 2026-10-21). Do not search for it.
 
