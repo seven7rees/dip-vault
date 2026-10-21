@@ -133,7 +133,7 @@ fn script_state_is_320_bytes_at_its_offsets() {
         holder_pile: 4,
         lp_pile: 5,
         paid_builder: 6,
-        burned_total: 7,
+        tokens_held: 7,
         steps: 8,
         ref_price: 9,
         ref_at: 10,
@@ -168,7 +168,7 @@ fn script_state_is_320_bytes_at_its_offsets() {
     assert_eq!(&d[225..], &[0u8; 95][..]);
     // keeper.json `view` reads these offsets live on the coin's page.
     let keeper = include_str!("../../script_variants/dipvault/keeper.json").replace([' ', '\n'], "");
-    for (label, offset) in [("Dippile", 57), ("Holderpile", 65), ("Liquiditypile", 73), ("Paidtoholders", 193), ("Coinsburned", 89), ("Liquiditylocked(SOL)", 201)] {
+    for (label, offset) in [("Dippile", 57), ("Holderpile", 65), ("Liquiditypile", 73), ("Paidtoholders", 193), ("CoinsheldforLP", 89), ("Liquiditylocked(SOL)", 201)] {
         assert!(keeper.contains(&format!("\"label\":\"{label}\",\"account\":\"script\",\"offset\":{offset},\"width\":8")), "view {label} at {offset}");
     }
 }

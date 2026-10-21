@@ -1,0 +1,50 @@
+Subject: Dip Vault: the new format of the pair (for the graphic and the video)
+
+Patrick,
+
+Here is the Dip Vault pair as it is now built (2026-10-21), for the new flow graphic and the new video. Everything below is what the code does; the numbers marked "proposed" are yours to set.
+
+THE ONE-LINE PITCH
+No early-sell tax. Hold 6 hours and get paid. Nothing is ever burned: every coin the pot buys becomes locked liquidity.
+
+THE BIG CHANGE FROM THE OLD PICTURE AND VIDEO
+The old version burned the coins from dip buys. The new one keeps them. The pot's dip buys and its liquidity adds now work together, the way LiquidityTek does it: dip buys catch the coin cheap, the liquidity steps pair those coins with SOL and lock them in the pool for ever. So the video's "dip buys + burns" frames become "dip buys, kept, then locked as liquidity". Cut every mention of burning.
+
+TRADES (the hook)
+1. Buys: 0% to the hook.
+2. Sells: a 1% brake only while the seller's hold clock is under 10 minutes. After 10 minutes a sell pays nothing to the hook. (The hook answers 0.8%; Bordrless adds a quarter on top, so about 1% trader-facing.)
+3. The hold clock is a weighted-average entry time. Coins arriving in an empty wallet start the clock at now. Topping up moves the clock toward now in proportion to the amount. Sending coins out does not move the sender's clock. Emptying a wallet clears it.
+4. The dust-delegate trick is closed: the brake keys on the holding the coins really leave, not on whoever signs.
+
+THE FEE
+Every creator fee: 50% to the launcher, 50% to the pot. Author share 0 (we take nothing from the launcher's half).
+
+THE POT, every step (every 5 minutes)
+First the builder's cut: 1% to 10% of new pot money, rising with the pool's real SOL. Proposed steps: 1% under 5 SOL, 2.5% from 5, 5% from 20, 7.5% from 50, 10% from 100 SOL. Then the rest splits in three equal piles:
+
+Pile 1, dip buys. Only when the price is 8% or more under the pot's own moving mark. At most 1% of the pool's real SOL per buy. At most one buy per 5 minutes. The coins bought are kept in the pot's own holding. Never burned, never sold.
+
+Pile 2, weekly holder payouts in SOL. A wallet earns nothing before 6 hours of holding. Weights: 1x at 6 hours, 1.5x at 7 days, 2x at 30 days, plus 10% more if the wallet never sold into the pool since it was funded. Week one measures everyone; from week two on, each week pays by the weights measured the week before. No claims needed: the companion pays the wallet directly.
+
+Pile 3, locked liquidity. After graduation, every other step takes about 1/48 of this pile (a four-hour drip), pairs the coins the pot holds with that SOL, and adds it to the coin's own pool. The LP lands in the launch's own LP holding, which nobody can spend. If the pot holds too few coins for the tranche, it buys the shortfall first.
+
+Step senders earn up to 0.00002 SOL per step from the pot.
+
+LIVE FIGURES ON THE COIN PAGE (new, via keeper.json "view")
+Dip pile, Holder pile, Liquidity pile, Paid to holders, Coins held for LP, Liquidity locked (SOL). These update within a second of the chain, so the video can show them as real counters.
+
+WORDS TO KEEP OFF THE GRAPHIC
+Burn. Audited. Safe. Guaranteed. Use "not audited" where a disclaimer is needed.
+
+SUGGESTED FRAME ORDER FOR THE VIDEO
+1. A buy: 0%.
+2. A sell inside 10 minutes: 1% brake. A sell after: 0%.
+3. The fee splits 50/50, launcher and pot.
+4. The pot splits: builder 1 to 10% by pool depth, then three piles.
+5. A dip: the pot buys and keeps the coins.
+6. Graduation: the coins pair with SOL and lock as liquidity.
+7. Clock to 6 hours, then a week: holders paid in SOL by weight.
+Keep the "SIMULATION, EXAMPLE LAUNCH" label on every frame.
+
+STATUS
+Built, compiled for Solana, 161 host tests passing. The on-chain simulation run (T9) is in progress. Not submitted, not deployed, not audited.

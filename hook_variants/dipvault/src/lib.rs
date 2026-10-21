@@ -58,7 +58,7 @@ pub mod clock;
 use clock::{brake_bps, on_receive, on_send, seller_stamp, Record, FREE_BPS};
 
 // Placeholder program id: Bordrless writes the real one when it builds the source.
-declare_id!("11111111111111111111111111111111");
+declare_id!("B6DHGfPX1uRG3aBtM8yPpBHGq4f83ZPPRHbYH1vL3o2p");
 
 /// Layout version of [`HookState`].
 pub const VERSION: u8 = 1;

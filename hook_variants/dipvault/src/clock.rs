@@ -100,6 +100,11 @@ impl Record {
     pub fn stamp_opt(&self) -> Option<i64> {
         self.is_set().then_some(self.stamp)
     }
+
+    /// Whether the holding sold into the pool since it was funded.
+    pub fn sold(&self) -> bool {
+        self.flags & FLAG_SOLD != 0
+    }
 }
 
 /// A time as the blend counts it: never before 1970.

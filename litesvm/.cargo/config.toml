@@ -1,0 +1,4 @@
+# The Bordrless programs' .so files, built from ref/ (scripts/solana/programs.sh build, or the
+# cargo build-sbf loop in DIP-VAULT-BUILD.md). The pair's own builds are read from ../target-sbf.
+[env]
+SBF_OUT_DIR = { value = "../ref/bordrless-programs/target/deploy", relative = true }

@@ -2,8 +2,8 @@
 //!
 //! Dip Vault: the pot (the companion fee plus the hook's 1% brake) is split every step. The
 //! builder's share scales with the pool's real SOL (`BUILDER_SCALE`); the rest goes in three equal
-//! parts to the dip buyback (bought and burned), the weekly holder payouts and the locked
-//! liquidity adds.
+//! parts to the dip buys (the coins bought are kept for liquidity, never burned), the weekly
+//! holder payouts and the locked liquidity adds, which pair the coins held with SOL.
 
 use anchor_lang::prelude::Pubkey;
 
@@ -64,10 +64,6 @@ pub const PARAMS: Params = Params {
     bounty_bound: 100_000,
     dip_only: true,
 };
-
-/// Whether the tokens a dip buy delivers are burned. When false they stay in the companion's
-/// holding (never sold by this script).
-pub const BURN_DIP_BUYS: bool = true;
 
 /// The wallet that receives the builder's share of new pot money.
 pub const BUILDER_WALLET: Pubkey =

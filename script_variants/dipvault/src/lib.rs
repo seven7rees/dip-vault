@@ -8,10 +8,12 @@
 //!   3. Roll the weekly payout round when a new one has begun.
 //!   4. Do one thing, in this order of preference:
 //!      - a dip buy: when the price is 8% or more under the script's own reference (`dip.rs`),
-//!        at most one every 5 minutes, at most 1% of the pool's real SOL; the coins are burned;
-//!      - else, on every other step, a locked-liquidity add (`liquidity.rs`), once the launch has
-//!        graduated: a tranche of the liquidity pile buys the coin and pairs it, the LP minted into
-//!        the launch's own LP holding, which nobody can spend;
+//!        at most one every 5 minutes, at most 1% of the pool's real SOL; the coins bought are
+//!        kept in the companion's holding for liquidity, never burned and never sold;
+//!      - else a locked-liquidity add (`liquidity.rs`), at most every 10 minutes once the launch
+//!        has graduated, yielding every other step to holder payouts when both are due: a tranche of the liquidity pile pairs the coins held (buying more only when
+//!        it holds too few) with SOL, the LP minted into the launch's own LP holding, which
+//!        nobody can spend;
 //!      - else the holder payouts (`holders.rs`): each holding the step brings is measured once a
 //!        round, and paid from the holder pile by its weight (amount times hold time, 1x at 6
 //!        hours, 1.5x at 7 days, 2x at 30 days, 10% more if it never sold) against the round
@@ -19,7 +21,8 @@
 //!   5. The builder is paid what it is owed, within the payout terms, as a wallet answer on any
 //!      step that answers no holder payouts.
 //!
-//! Money only leaves the pot through the swaps, the liquidity add and the answers. Nothing a
+//! Coins never leave the companion's holding except into the pool as locked liquidity. Money only
+//! leaves the pot through the swaps, the liquidity add and the answers. Nothing a
 //! cranker passes can change where it goes: the builder wallet is a constant, the holdings are
 //! checked against their hook data, and every account is found by key.
 
@@ -34,8 +37,8 @@ use bordrless_token::client as token_client;
 
 use crate::math::Piles;
 use crate::params::{
-    BUILDER_WALLET, BURN_DIP_BUYS, DIP, LP_EVERY_SECS, LP_MIN_ADD, LP_PACE_STEPS, PARAMS,
-    PAYOUT_MAX_ENTRIES, ROUND_SECS,
+    BUILDER_WALLET, DIP, LP_EVERY_SECS, LP_MIN_ADD, LP_PACE_STEPS, PARAMS, PAYOUT_MAX_ENTRIES,
+    ROUND_SECS,
 };
 use crate::record::Record;
 
@@ -48,7 +51,7 @@ pub mod params;
 pub mod record;
 
 // Placeholder: Bordrless writes the real program id when it builds the source.
-declare_id!("ScRiPtXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX");
+declare_id!("EijCJveFpJnzFCP2gyMBtqEJApG5NaAL34EmpokcB9uH");
 
 /// The companion program that calls this script and checks its answers.
 pub const COMPANION_ID: Pubkey =
@@ -71,7 +74,7 @@ pub const HOOK_STATE_SEED: &[u8] = b"state";
 //   [65..73]   holder_pile    u64  the holder payouts' pile
 //   [73..81]   lp_pile        u64  the locked liquidity's pile
 //   [81..89]   paid_builder   u64  lamports paid to the builder wallet so far
-//   [89..97]   burned_total   u64  tokens burned so far
+//   [89..97]   tokens_held    u64  coins bought and held for liquidity, not yet paired
 //   [97..105]  steps          u64  steps run so far
 //   [105..121] ref_price      u128 dip reference price (PRICE_SCALE times quote per base); 0 = unset
 //   [121..129] ref_at         i64  last time the reference was moved up
@@ -92,7 +95,7 @@ pub const HOOK_STATE_SEED: &[u8] = b"state";
 pub const STATE_VERSION: u8 = 1;
 
 #[account]
-#[derive(InitSpace)]
+#[derive(InitSpace, Debug)]
 pub struct ScriptState {
     pub version: u8,
     pub mint: Pubkey,
@@ -102,7 +105,7 @@ pub struct ScriptState {
     pub holder_pile: u64,
     pub lp_pile: u64,
     pub paid_builder: u64,
-    pub burned_total: u64,
+    pub tokens_held: u64,
     pub steps: u64,
     pub ref_price: u128,
     pub ref_at: i64,
@@ -169,8 +172,6 @@ pub enum ScriptError {
     Unsupported,
     #[msg("an account is wrong, missing, or owned by the wrong program")]
     BadAccount,
-    #[msg("a buy is due but the mint account is not writable in this step")]
-    MintNotWritable,
     #[msg("arithmetic overflow")]
     MathOverflow,
 }
@@ -195,7 +196,7 @@ pub struct CompanionStep<'info> {
     /// The companion's creator address for this mint; it holds the pot and signs the swaps.
     #[account(seeds = [b"creator", mint.as_ref()], bump, seeds::program = COMPANION_ID)]
     pub creator: Signer<'info>,
-    /// CHECK: the mint; must be writable in the step for a burn (keeper.json `mintWritable`).
+    /// CHECK: the mint.
     pub mint_account: UncheckedAccount<'info>,
     /// CHECK: the launch for this mint; read and checked in the handler.
     pub launch: UncheckedAccount<'info>,
@@ -213,11 +214,12 @@ pub struct CompanionStep<'info> {
     pub state: Box<Account<'info, ScriptState>>,
 }
 
-/// What one step did: lamports spent on trades, coins burned, LP minted.
+/// What one step did: lamports spent on trades, coins bought and kept, coins paired, LP minted.
 #[derive(Default)]
 struct Done {
     spent: u64,
-    burned: u64,
+    kept: u64,
+    paired: u64,
     lp_minted: u64,
 }
 
@@ -256,7 +258,7 @@ pub mod dipvault_script {
         require!(launch.modules == 0, ScriptError::Unsupported);
 
         // The companion: check it is this mint's, then read the pot and the launch price.
-        let (pot_before, launch_price, launch_at, beneficiary): (u64, u128, i64, Pubkey) = {
+        let (pot_before, launch_price, launch_at, beneficiary, dev_bag): (u64, u128, i64, Pubkey, u64) = {
             let info = ctx.accounts.companion.to_account_info();
             require_keys_eq!(*info.owner, COMPANION_ID, ScriptError::BadAccount);
             let data = info.try_borrow_data()?;
@@ -268,6 +270,7 @@ pub mod dipvault_script {
                 layout::read_reference_price(&data).ok_or(error!(ScriptError::BadAccount))?,
                 layout::read_reference_at(&data).ok_or(error!(ScriptError::BadAccount))?,
                 layout::read_companion_beneficiary(&data).ok_or(error!(ScriptError::BadAccount))?,
+                layout::read_dev_bag(&data).ok_or(error!(ScriptError::BadAccount))?,
             )
         };
 
@@ -374,7 +377,17 @@ pub mod dipvault_script {
         let lp_due = graduated
             && now >= ctx.accounts.state.lp_last_at.saturating_add(LP_EVERY_SECS)
             && buy_amount_opt.is_none();
-        let lp_tranche = if lp_due {
+        // Holders the step brings that this round has not measured yet. On a step where both a
+        // liquidity add and payouts are due, the payouts take every other step, so neither starves.
+        let candidates = terms.is_some()
+            && ctx.remaining_accounts.iter().any(|info| {
+                *info.owner == bordrless_token::ID
+                    && token_client::read_holding(info).is_ok_and(|h| {
+                        h.mint == mint && Record::decode(&h.hook_data).round != round.round
+                    })
+            });
+        let payouts_turn = candidates && (!lp_due || ctx.accounts.state.steps % 2 == 1);
+        let lp_tranche = if lp_due && !payouts_turn {
             math::lp_tranche(piles.lp, LP_PACE_STEPS, LP_MIN_ADD, pool_cap)
         } else {
             None
@@ -394,8 +407,7 @@ pub mod dipvault_script {
         let mut done = Done::default();
 
         if let Some(amount) = buy_amount_opt {
-            // A dip buy, then a burn of exactly what the swap delivered.
-            require!(ctx.accounts.mint_account.is_writable, ScriptError::MintNotWritable);
+            // A dip buy: the coins delivered stay in the companion's holding for liquidity.
             let lamports_before = ctx.accounts.creator.lamports();
             let holding_before = holding_amount(&all_accounts, &held)?;
             let min_out = math::min_out(
@@ -410,11 +422,7 @@ pub mod dipvault_script {
                 launch_client::swap_v2_with_base_slice(&keys, me, me, 1, amount, min_out, slice.clone());
             invoke(&swap_ix, &all_accounts)?;
             done.spent = lamports_before.saturating_sub(ctx.accounts.creator.lamports());
-            let bought = holding_amount(&all_accounts, &held)?.saturating_sub(holding_before);
-            if bought > 0 && BURN_DIP_BUYS {
-                burn(&all_accounts, me, held, mint_key, &slice, bought)?;
-                done.burned = bought;
-            }
+            done.kept = holding_amount(&all_accounts, &held)?.saturating_sub(holding_before);
             piles.dip = piles.dip.saturating_sub(done.spent);
             // The reference: lowered by a buy toward the price it left.
             if PARAMS.dip_only {
@@ -428,24 +436,32 @@ pub mod dipvault_script {
                 dip_ref = dip::after_buy(dip_ref, price_after, now, &DIP);
             }
         } else if let Some(tranche) = lp_tranche {
-            // A locked-liquidity add: buy, then pair the coins bought with the rest of the tranche.
-            require!(ctx.accounts.mint_account.is_writable, ScriptError::MintNotWritable);
+            // A locked-liquidity add: the coins held (never the dev bag) pair with the tranche; when
+            // they are worth less than the tranche, part of it buys more first.
             let lamports_before = ctx.accounts.creator.lamports();
             let holding_before = holding_amount(&all_accounts, &held)?;
-            let buy = liquidity::buy_part(tranche).min(pool_cap).max(PARAMS.min_buy);
-            let min_out = math::min_out(
-                buy,
-                reserves.base_reserve,
-                reserves.virtual_base,
-                reserves.quote_reserve,
-                reserves.virtual_quote,
-                PARAMS.min_out_bps,
-            );
-            let swap_ix =
-                launch_client::swap_v2_with_base_slice(&keys, me, me, 1, buy, min_out, slice.clone());
-            invoke(&swap_ix, &all_accounts)?;
-            let buy_spent = lamports_before.saturating_sub(ctx.accounts.creator.lamports());
-            let bought = holding_amount(&all_accounts, &held)?.saturating_sub(holding_before);
+            let spendable = holding_before.saturating_sub(dev_bag);
+            let worth = math::ceil_ratio(spendable, reserves.quote_reserve, reserves.base_reserve).unwrap_or(u64::MAX);
+            let mut buy_spent = 0u64;
+            if worth < tranche {
+                let buy = liquidity::buy_part(tranche.saturating_sub(worth))
+                    .min(pool_cap)
+                    .max(PARAMS.min_buy)
+                    .min(tranche);
+                let min_out = math::min_out(
+                    buy,
+                    reserves.base_reserve,
+                    reserves.virtual_base,
+                    reserves.quote_reserve,
+                    reserves.virtual_quote,
+                    PARAMS.min_out_bps,
+                );
+                let swap_ix =
+                    launch_client::swap_v2_with_base_slice(&keys, me, me, 1, buy, min_out, slice.clone());
+                invoke(&swap_ix, &all_accounts)?;
+                buy_spent = lamports_before.saturating_sub(ctx.accounts.creator.lamports());
+            }
+            let coins = holding_amount(&all_accounts, &held)?.saturating_sub(dev_bag);
             let after_buy = {
                 let info = ctx.accounts.pool.to_account_info();
                 let data = info.try_borrow_data()?;
@@ -453,7 +469,7 @@ pub mod dipvault_script {
             };
             let quote_budget = tranche.saturating_sub(buy_spent);
             if let Some((base_desired, quote_desired)) = liquidity::pairing(
-                bought,
+                coins,
                 after_buy.base_reserve,
                 after_buy.quote_reserve,
                 quote_budget,
@@ -475,12 +491,9 @@ pub mod dipvault_script {
                     .unwrap_or(lp_before)
                     .saturating_sub(lp_before);
             }
-            // Coins bought and not paired are burned, as a dip buy's are.
-            let leftover = holding_amount(&all_accounts, &held)?.saturating_sub(holding_before);
-            if leftover > 0 && BURN_DIP_BUYS {
-                burn(&all_accounts, me, held, mint_key, &slice, leftover)?;
-                done.burned = leftover;
-            }
+            let holding_after = holding_amount(&all_accounts, &held)?;
+            done.paired = coins.saturating_sub(holding_after.saturating_sub(dev_bag));
+            done.kept = holding_after.saturating_add(done.paired).saturating_sub(holding_before);
             done.spent = lamports_before.saturating_sub(ctx.accounts.creator.lamports());
             piles.lp = piles.lp.saturating_sub(done.spent);
             ctx.accounts.state.lp_last_at = now;
@@ -626,7 +639,10 @@ pub mod dipvault_script {
         state.last_pot = pot_left;
         state.paid_builder = state.paid_builder.saturating_add(pay_builder);
         state.holders_paid = state.holders_paid.saturating_add(paid_holders);
-        state.burned_total = state.burned_total.saturating_add(done.burned);
+        state.tokens_held = state
+            .tokens_held
+            .saturating_add(done.kept)
+            .saturating_sub(done.paired);
         state.steps = state.steps.saturating_add(1);
         if PARAMS.dip_only {
             state.ref_price = dip_ref.price;
@@ -662,30 +678,6 @@ pub fn hook_slice(custom_hook: Option<Pubkey>, mint: &Pubkey, pool: &Pubkey) -> 
         }
         None => Vec::new(),
     }
-}
-
-/// A burn of `amount` from `held` through the hook slice.
-fn burn(
-    all: &[AccountInfo],
-    me: Pubkey,
-    held: Pubkey,
-    mint: Pubkey,
-    slice: &[AccountMeta],
-    amount: u64,
-) -> Result<()> {
-    let (hook_struct, extras) = match slice {
-        [prog, signer, rest @ ..] => (
-            Some(token_client::Hook {
-                program: prog.pubkey,
-                signer: signer.pubkey,
-            }),
-            rest.to_vec(),
-        ),
-        _ => (None, vec![]),
-    };
-    let ix = token_client::burn_with(me, held, mint, hook_struct, extras, amount);
-    invoke(&ix, all)?;
-    Ok(())
 }
 
 /// The token balance of the holding at `key` among `accounts`. A holding that is missing or does

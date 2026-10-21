@@ -139,7 +139,10 @@ def is_pubkey(s) -> bool:
     return lead + len(body) == 32
 
 
-def check_keeper(path: Path, problems: list, state_len: int = STATE_LEN):
+NO_BURN = {"dipvault"}  # pairs whose script never burns: the mint need not be writable
+
+
+def check_keeper(path: Path, problems: list, state_len: int = STATE_LEN, burns: bool = True):
     try:
         k = json.loads(path.read_text())
     except ValueError as e:
@@ -181,7 +184,7 @@ def check_keeper(path: Path, problems: list, state_len: int = STATE_LEN):
     ls = k.get("launcherShareBps")
     if ls is not None and not (is_int(ls) and 0 <= ls <= 9_500):
         problems.append(f"{path}: launcherShareBps must be 0 to 9,500")
-    if k.get("mintWritable") is not True:
+    if burns and k.get("mintWritable") is not True:
         problems.append(f"{path}: mintWritable must be true (the burn needs the mint writable)")
 
 
@@ -209,7 +212,7 @@ def main():
             elif kj.stat().st_size > KEEPER_MAX:
                 problems.append(f"{kj}: over {KEEPER_MAX} bytes")
             else:
-                check_keeper(kj, problems, STATE_LENS.get(variant.name, STATE_LEN))
+                check_keeper(kj, problems, STATE_LENS.get(variant.name, STATE_LEN), variant.name not in NO_BURN)
             if not (script / "src" / "lib.rs").is_file():
                 problems.append(f"{script}: src/lib.rs missing")
         print(f"{variant.name}: scanned")

@@ -1,0 +1,42 @@
+# T9: the Dip Vault pair run in LiteSVM against the Bordrless programs built from ref/ (the bytes
+# that would be deployed) and the pair's own SBF builds in ../target-sbf. Its own workspace; the
+# git deps of the pair's crates are patched to the ref/ mirror below.
+[workspace]
+members = ["."]
+
+[package]
+name = "dipvault-litesvm"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dev-dependencies]
+anchor-lang = "=1.2.0"
+bordrless-program-tests = { path = "../ref/bordrless-programs/programs/tests" }
+bordrless-companion = { path = "../ref/bordrless-programs/programs/bordrless_companion", features = ["no-entrypoint"] }
+bordrless-launch    = { path = "../ref/bordrless-programs/programs/bordrless_launch", features = ["no-entrypoint"] }
+bordrless-token     = { path = "../ref/bordrless-programs/programs/bordrless_token", features = ["no-entrypoint"] }
+bordrless-swap      = { path = "../ref/bordrless-programs/programs/bordrless_swap", features = ["no-entrypoint"] }
+bordrless-bridge    = { path = "../ref/bordrless-programs/programs/bordrless_bridge", features = ["no-entrypoint"] }
+bordrless-core      = { path = "../ref/bordrless-programs/crates/bordrless-core" }
+bordrless-hook      = { path = "../ref/bordrless-programs/crates/bordrless-hook" }
+bordrless-game      = { path = "../ref/bordrless-programs/crates/bordrless-game" }
+dipvault-hook   = { path = "../hook_variants/dipvault",   features = ["no-entrypoint"] }
+dipvault-script = { path = "../script_variants/dipvault", features = ["no-entrypoint"] }
+solana-keypair = "=3.1.2"
+solana-signer = "=3.0.1"
+
+[patch."https://github.com/BordrlessDex/bordrless-programs"]
+bordrless-hook   = { path = "../ref/bordrless-programs/crates/bordrless-hook" }
+bordrless-game   = { path = "../ref/bordrless-programs/crates/bordrless-game" }
+bordrless-launch = { path = "../ref/bordrless-programs/programs/bordrless_launch" }
+bordrless-token  = { path = "../ref/bordrless-programs/programs/bordrless_token" }
+bordrless-swap   = { path = "../ref/bordrless-programs/programs/bordrless_swap" }
+bordrless-core   = { path = "../ref/bordrless-programs/crates/bordrless-core" }
+bordrless-strategy = { path = "../ref/bordrless-programs/crates/bordrless-strategy" }
+bordrless-bridge = { path = "../ref/bordrless-programs/programs/bordrless_bridge" }
+bordrless-kit    = { path = "../ref/bordrless-programs/programs/bordrless_kit" }
+bordrless-companion = { path = "../ref/bordrless-programs/programs/bordrless_companion" }

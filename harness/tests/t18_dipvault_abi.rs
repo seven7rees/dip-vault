@@ -215,7 +215,7 @@ fn builder_wallet_is_the_wallet_file_and_the_keeper_names_it() {
     assert!(keeper.contains(file), "keeper.json wallets must name the builder wallet");
     let flat = keeper.replace([' ', '\n'], "");
     assert!(flat.contains("\"payouts\":true"), "the companion's payout accounts come first");
-    assert!(flat.contains("\"mintWritable\":true"), "burns need the mint writable");
+    assert!(flat.contains("\"mintWritable\":false"), "nothing is burned: the mint need not be writable");
     assert!(flat.contains("\"stepSecs\":300"));
     assert!(flat.contains("\"stateLen\":320"));
     assert!(flat.contains("\"offset\":1,\"width\":4,\"compare\":\"ne\",\"against\":{\"epoch\":{\"secs\":604800"), "the round field, not this week's epoch");

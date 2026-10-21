@@ -20,3 +20,15 @@ bordrless-token = { git = "https://github.com/BordrlessDex/bordrless-programs",
 
 [workspace]
 members = ["."]
+
+# Local builds only: the Workshop uses its own Cargo.toml and lock. Pin the crates to the ref/ mirror.
+[patch."https://github.com/BordrlessDex/bordrless-programs"]
+bordrless-hook   = { path = "../../ref/bordrless-programs/crates/bordrless-hook" }
+bordrless-game   = { path = "../../ref/bordrless-programs/crates/bordrless-game" }
+bordrless-launch = { path = "../../ref/bordrless-programs/programs/bordrless_launch" }
+bordrless-token  = { path = "../../ref/bordrless-programs/programs/bordrless_token" }
+bordrless-swap   = { path = "../../ref/bordrless-programs/programs/bordrless_swap" }
+bordrless-core   = { path = "../../ref/bordrless-programs/crates/bordrless-core" }
+bordrless-strategy = { path = "../../ref/bordrless-programs/crates/bordrless-strategy" }
+bordrless-bridge = { path = "../../ref/bordrless-programs/programs/bordrless_bridge" }
+bordrless-kit    = { path = "../../ref/bordrless-programs/programs/bordrless_kit" }

@@ -12,9 +12,43 @@ Not audited.
 | Script `script_variants/dipvault/src/*.rs` (8 files) + `keeper.json` | IMPLEMENTED, COMPILED (host) | same |
 | Host tests T15-T19 (40 tests) | TEST-EXECUTED, all pass | `cargo test`: 161 passed, 0 failed (T1-T14 still green) |
 | Workshop rule scan (`tools/scan_rules.py dist`) | TEST-EXECUTED, clean | `python3 -I tools/make_variants.py && python3 -I tools/scan_rules.py dist` |
-| SBF build (`cargo build-sbf`) | NOT DONE | no Solana toolchain on this machine; the owner asked to be asked first |
-| T9-style LiteSVM run of the real `companion_step` | NOT DONE | needs the SBF build above |
+| SBF build (`cargo build-sbf --tools-version v1.57 --arch v3`) | COMPILED (owner approved the toolchain install 2026-10-21; solana-cli 4.3.1, platform-tools v1.57) | `target-sbf/dipvault_hook.so` 200 KB, `dipvault_script.so` 220 KB |
+| T9: the real `companion_step` in LiteSVM, the whole story (`litesvm/tests/t9_dipvault.rs`) | TEST-EXECUTED, passes | `cd litesvm && cargo test` (needs the 21 Bordrless `.so` built from `ref/`, see below) |
 | Workshop trading test, reading, approval | NOT DONE | needs a submission, which is the owner's step |
+
+## T9: what the LiteSVM run proves (2026-10-21)
+
+One test, against the Bordrless programs built from the pinned source (`ref/bordrless-programs`
+@ c6676977, 15 programs + 6 test fixtures, `cargo build-sbf` each) and the pair's own SBF builds:
+`prepare`; a quote-cut config (buys capped 1, sells 80) naming the hook with flags 145; a native
+script launch with the payout terms and wallet payouts allowed (`companion.create`, the hook's
+`prepare`, `create_script_v2`, `allow_wallet_payouts`, `launch_script`); three buys that start
+hold clocks; an early sell that pays the brake (`Launch.quote_cut_accrued` grows) and a sell after
+10 minutes that pays nothing; the relay in the hook state names the last seller; the fees claimed
+into the pot; the first step splits them and pays the builder wallet; a whale pump, eight steps
+that raise the reference, a dump, then a step that buys the dip and keeps the coins
+(`tokens_held`); the curve filled and graduated; a step that adds locked liquidity and the LP
+lands in `Launch.lp_holding` by exactly `lp_minted`; a new week in which a step measures the
+three holders (touches, 0 lamports, the hook writes the round); the same holders are not touched
+again that week; the next week a step pays them and each holder's hook record `paid` equals the
+SOL its wallet gained. After every step the script's four piles equal the companion's
+`pending_pot`.
+
+T9 found one real bug, fixed in `c1747c1`: a due liquidity add preempted the holder payouts on
+every step, so holders were never paid once the launch graduated. Now payouts take every other
+step when both are due.
+
+Not measured: compute units per step (the test passes under the harness's 1.4M budget with no
+figure recorded) and the 64-instruction trace with 8 payout entries plus the keeper's real
+account set (the test passes 3 holders).
+
+To reproduce: install the Solana CLI (`sh -c "$(curl -sSfL https://release.anza.xyz/stable/install)"`),
+build the Bordrless programs into `ref/bordrless-programs/target/deploy` (the loop in
+`scripts/solana/programs.sh cmd_build`, plus the fixtures under `programs/tests/fixtures/`),
+build the pair (`cargo build-sbf --manifest-path hook_variants/dipvault/Cargo.toml --sbf-out-dir
+target-sbf`, the same for `script_variants/dipvault`), then `cd litesvm && cargo test`. The
+`declare_id!` values in both crates are the local build keypairs' addresses (public keys only;
+the keypairs stay in the ignored `target-sbf/`); Bordrless writes the real ids at submission.
 
 ## The three feasibility checks (DIP-VAULT.md BUILD ORDER 1-3): all buildable, with sources
 
@@ -71,8 +105,10 @@ the base transfer into the vault (which runs the token hook's `before_transfer`)
   in the script state that always add up to the pot (`math::Piles`, `reconcile`; T16 runs 5,000
   random steps and checks every lamport in equals every lamport out plus the pot).
 - Dip buys: unchanged DIP engine (8% under the reference, 1/48 of the dip pile, at most 1% of
-  the pool's real SOL, one per 5 minutes), bought coins burned (`BURN_DIP_BUYS = true`; one
-  constant to flip, see open decisions).
+  the pool's real SOL, one per 5 minutes). NO BURN (owner, 2026-10-21 in chat: "no burn, lets do
+  the lp thing like liquiditytek does"): the coins bought stay in the companion's holding
+  (`tokens_held`), never sold, and the liquidity steps pair them into locked LP. This replaces
+  DIP-VAULT.md v5 item 6's "bought tokens burned".
 - Weekly holder payouts: rounds are weeks (`ROUND_SECS` 604,800, the keeper's epoch). Each
   holding the keeper brings is measured once a round (weight = balance x tier: 1x from 6 h,
   1.5x from 7 d, 2x from 30 d, plus 10% if it never sold since funded) and paid from the round's
@@ -80,8 +116,11 @@ the base transfer into the vault (which runs the token hook's `before_transfer`)
   round before. The first round measures only; payouts start in week two. A holding under 6
   hours is touched (counted 0) so it is not brought again that week. At most 8 entries a step.
 - Locked liquidity: every other step after graduation, a tranche of 1/48 of the liquidity pile
-  (at least 0.002 SOL, at most twice the buy cap) buys the coin with 48.5% and pairs the coins at
-  the pool's exact ratio with the rest; LP minted into `Launch.lp_holding`; leftover coins burned.
+  (at least 0.002 SOL, at most twice the buy cap). The coins held (never the dev bag, read from
+  `Companion.dev_tokens - dev_released`) pair with the tranche at the pool's exact ratio; only
+  when they are worth less than the tranche does part of it buy more first. LP minted into
+  `Launch.lp_holding`. Coins not paired stay held for the next add. `mintWritable` is false:
+  nothing is ever burned.
 - Step pay: the companion's own bounty (20,000 lamports flat; `SCRIPT_BOUNTY * min(n, 8) / 8`
   on a step with an n-entry answer), taken out of the piles in the order dip, lp, holders, owed.
 - One action per step besides the builder payout: a dip buy if the rule fires; else a liquidity
@@ -92,13 +131,12 @@ the base transfer into the vault (which runs the token hook's `before_transfer`)
 
 - `NEVER_SOLD_BONUS_BPS = 1_000`: a holding that never sold into the pool since it was funded
   weighs 10% more. One constant; 0 turns it off. Not in DIP-VAULT.md v5.
-- `BURN_DIP_BUYS` constant (true): the owner asked "maybe no burn?" on 2026-10-21. With false,
-  bought coins stay in the companion's holding and are never sold by this script.
+- No burn anywhere (owner decision 2026-10-21). The hook keeps `before_burn` so a holder's own
+  burn still cuts their record.
 
 ## Open decisions for the owner
 
 1. The builder scale steps (proposed above).
-2. Burn or keep dip-bought coins (`BURN_DIP_BUYS`); the listing words say "burn".
 3. Keep the never-sold bonus at 10%, change it, or drop it.
 4. Payout terms in `keeper.json`: stepBps 2000, holdingBps 10000, windowBps 10000, windowSecs
    86400. These bound the companion's checks only; the script's own piles are the real limit.

@@ -116,6 +116,19 @@ pub fn read_companion_beneficiary(data: &[u8]) -> Option<Pubkey> {
     ))
 }
 
+/// Byte offsets of `Companion.dev_tokens` and `Companion.dev_released` (u64 LE).
+pub const COMPANION_DEV_TOKENS_OFFSET: usize = 116;
+pub const COMPANION_DEV_RELEASED_OFFSET: usize = 124;
+
+/// The dev bag still held: `dev_tokens - dev_released`. The script never spends it. `None` if too
+/// short.
+pub fn read_dev_bag(data: &[u8]) -> Option<u64> {
+    let u64_at = |off: usize| -> Option<u64> {
+        Some(u64::from_le_bytes(data.get(off..off + 8)?.try_into().ok()?))
+    };
+    Some(u64_at(COMPANION_DEV_TOKENS_OFFSET)?.saturating_sub(u64_at(COMPANION_DEV_RELEASED_OFFSET)?))
+}
+
 /// Reads `Companion.pending_pot` (u64 LE) from raw account data. `None` if too short.
 pub fn read_pending_pot(data: &[u8]) -> Option<u64> {
     let end = COMPANION_POT_OFFSET + 8;
