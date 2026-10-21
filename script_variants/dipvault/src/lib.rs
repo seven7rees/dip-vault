@@ -21,8 +21,9 @@
 //!   5. The builder is paid what it is owed, within the payout terms, as a wallet answer on any
 //!      step that answers no holder payouts.
 //!
-//! Coins never leave the companion's holding except into the pool as locked liquidity. Money only
-//! leaves the pot through the swaps, the liquidity add and the answers. Nothing a
+//! The coins the pot buys never leave the companion's holding except into the pool as locked
+//! liquidity (the launcher's dev bag sits in the same holding and vests out on its own). Money
+//! only leaves the pot through the swaps, the liquidity add and the answers. Nothing a
 //! cranker passes can change where it goes: the builder wallet is a constant, the holdings are
 //! checked against their hook data, and every account is found by key.
 
@@ -402,7 +403,6 @@ pub mod dipvault_script {
                             && rec.is_set()
                             && eligible(&h.owner, &excluded)
                             && rec.round != round.round
-                            && holders::held_since_round_start(rec.stamp, round.round, ROUND_SECS)
                     })
             });
         let payouts_turn = candidates && (!lp_due || ctx.accounts.state.steps % 2 == 1);
@@ -569,15 +569,26 @@ pub mod dipvault_script {
                         continue;
                     }
                     let rec = Record::decode(&h.hook_data);
-                    if !rec.is_set()
-                        || rec.amount != h.amount
-                        || rec.round == round.round
-                        || !holders::held_since_round_start(rec.stamp, round.round, ROUND_SECS)
-                    {
+                    if !rec.is_set() || rec.amount != h.amount || rec.round == round.round {
                         continue;
                     }
-                    let w = record::weight(&rec, h.amount, now);
-                    let pay = holders::due(&round, w, piles.holders, step_left, holding_cap);
+                    // Measured for this round at the round's first second (a clock started after it
+                    // counts 0: a touch marks it so it is not brought again until next week). Paid
+                    // for the round before only if it was measured then, by its weight as it was
+                    // measured (the balance capped at the measured one, the hold time at that
+                    // round's first second), so the shares paid never add up past the budget.
+                    let start = holders::round_start(round.round, ROUND_SECS);
+                    let w_now = record::weight(&rec, h.amount, start);
+                    let w_prev_basis = if round.w_prev > 0 && rec.round == round.round.wrapping_sub(1) {
+                        record::weight(&rec, h.amount.min(rec.measured), holders::round_start(rec.round, ROUND_SECS))
+                    } else {
+                        0
+                    };
+                    let pay = match holders::decide(&round, w_prev_basis, piles.holders, step_left, holding_cap) {
+                        holders::Decision::Pay(x) => x,
+                        holders::Decision::Touch => 0,
+                        holders::Decision::Skip => continue,
+                    };
                     if pay > 0 {
                         // Paid only into an account the companion will take: its owner's, passed
                         // writable, plain, system-owned, not left below rent. Otherwise the
@@ -594,7 +605,7 @@ pub mod dipvault_script {
                         }
                     }
                     seen.push(*info.key);
-                    round.w_cur = round.w_cur.saturating_add(w);
+                    round.w_cur = round.w_cur.saturating_add(w_now);
                     round.measured = round.measured.saturating_add(1);
                     round.paid = round.paid.saturating_add(pay);
                     paid_holders = paid_holders.saturating_add(pay);

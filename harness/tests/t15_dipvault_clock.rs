@@ -18,6 +18,7 @@ fn a_record_round_trips_at_its_offsets() {
         paid: 9,
         entered_at: 11,
         flags: FLAG_SOLD,
+        measured: 13,
     };
     let d = r.encode();
     assert_eq!(Record::decode(&d), r);
@@ -28,7 +29,8 @@ fn a_record_round_trips_at_its_offsets() {
     assert_eq!(&d[21..29], &9u64.to_le_bytes());
     assert_eq!(&d[29..37], &11i64.to_le_bytes());
     assert_eq!(d[37], 1);
-    assert_eq!(&d[38..], &[0u8; 26][..]);
+    assert_eq!(&d[38..46], &13u64.to_le_bytes());
+    assert_eq!(&d[46..], &[0u8; 18][..]);
     assert_eq!(Record::decode(&[0; 64]), Record::default());
     assert!(!Record::default().is_set());
     assert_eq!(Record::default().stamp_opt(), None);
@@ -45,9 +47,10 @@ fn the_script_reads_the_hooks_record_byte_for_byte() {
         paid: 55,
         entered_at: NOW - 200,
         flags: FLAG_SOLD,
+        measured: 999,
     };
     let s = dipvault_script::record::Record::decode(&r.encode());
-    assert_eq!((s.version, s.round, s.stamp, s.amount, s.paid, s.entered_at, s.flags), (1, 42, NOW - 100, 1_000, 55, NOW - 200, FLAG_SOLD));
+    assert_eq!((s.version, s.round, s.stamp, s.amount, s.paid, s.entered_at, s.flags, s.measured), (1, 42, NOW - 100, 1_000, 55, NOW - 200, FLAG_SOLD, 999));
     assert!(s.sold());
 }
 
@@ -90,9 +93,10 @@ fn a_top_up_keeps_the_round_the_paid_total_and_the_flags() {
         paid: 40,
         entered_at: NOW - 2_000,
         flags: FLAG_SOLD,
+        measured: 100,
     };
     on_receive(&mut r, 100, 100, NOW);
-    assert_eq!((r.round, r.paid, r.entered_at, r.flags, r.amount), (3, 40, NOW - 2_000, FLAG_SOLD, 200));
+    assert_eq!((r.round, r.paid, r.entered_at, r.flags, r.amount, r.measured), (3, 40, NOW - 2_000, FLAG_SOLD, 200, 100));
     assert_eq!(r.stamp, NOW - 500);
 }
 

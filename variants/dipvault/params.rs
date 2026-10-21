@@ -120,7 +120,9 @@ pub const WEIGHT_TIERS: [WeightTier; 3] = [
 /// A holding that has not sold into the pool since it was funded weighs this much more, in basis
 /// points of its weight: 10%. Set to 0 to turn the bonus off.
 pub const NEVER_SOLD_BONUS_BPS: u16 = 1_000;
-/// The most holdings one step pays or measures (the companion pays at most 10 a step).
+/// The most holdings one step pays or measures (the companion pays at most 10 a step; the keeper
+/// brings at most `perStep` of keeper.json: 1, what fits one transaction beside the swap and
+/// payout accounts with the protocol's lookup table, measured in T9).
 pub const PAYOUT_MAX_ENTRIES: usize = 8;
 /// A payout under this many lamports is not sent; the holding is measured (touched) instead
 /// and its weight still counts: 0.0001 SOL.

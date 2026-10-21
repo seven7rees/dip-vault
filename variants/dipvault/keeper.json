@@ -16,7 +16,7 @@
     },
     "payTo": "owner",
     "perStep": {
-      "withSwapAccounts": 8,
+      "withSwapAccounts": 1,
       "withoutSwapAccounts": null
     }
   },
@@ -30,7 +30,7 @@
   "stepSecs": 300,
   "stateLen": 320,
   "payoutTerms": {
-    "stepBps": 2000,
+    "stepBps": 10000,
     "holdingBps": 10000,
     "windowBps": 10000,
     "windowSecs": 86400
@@ -73,11 +73,12 @@
       "as": "tokens"
     },
     {
-      "label": "Liquidity locked (SOL)",
+      "label": "SOL into liquidity",
       "account": "script",
       "offset": 201,
       "width": 8,
       "as": "lamports"
     }
-  ]
+  ],
+  "roundSecs": 604800
 }

@@ -5,11 +5,15 @@
 //! the round's total `w_cur`, and the hook records the round in its hook data so it is not brought
 //! again until the next one. Only a holding whose clock started before the round began counts
 //! (`held_since_round_start`): coins that arrive, or move to a fresh wallet, during the round are
-//! marked and wait for the next one, so moving coins cannot earn twice in a week. A holding
-//! measured is paid at once from the round's budget (the holder pile at the round's first step)
-//! by its share of the total measured the round before: `budget * w / w_prev`. The first round
-//! measures only. Weight measured beyond the round before's total is paid up to what the budget
-//! has left, first come first served, and a budget not fully paid stays in the pile.
+//! touched (marked, counted 0) and wait for the next one, so moving coins cannot earn twice in a
+//! week. A holding measured is paid at once from the round's budget (the holder pile at the
+//! round's first step) by its share of the total measured the round before: `budget * w /
+//! w_prev`. The first round measures only. What a holding earns this round but the step cannot
+//! pay now (the step's budget or the pile is used up) is not touched: the holding is skipped
+//! and the keeper brings it again next step ([`Decision::Skip`]), so a step's budget never costs
+//! a holder its week. Weight measured beyond the round before's total is paid up to what the
+//! round's budget has left, first come first served, and a budget not fully paid stays in the
+//! pile.
 
 use crate::math::share;
 use crate::params::MIN_PAYOUT_LAMPORTS;
@@ -70,22 +74,49 @@ pub fn roll(r: Round, now_round: u32, holder_pile: u64) -> Round {
     }
 }
 
-/// What a holding of weight `w` is paid this round: its share of the budget by the previous
-/// round's total, never over what the budget has left, the holder pile, the step's remaining
-/// budget or the per-holding cap; under `MIN_PAYOUT_LAMPORTS` it is a touch (0). 0 when the
-/// round measures only (`w_prev` 0) or the weight is 0.
-pub fn due(r: &Round, w: u128, holder_pile: u64, step_left: u64, holding_cap: u64) -> u64 {
+/// What a step does with one holding this round.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Decision {
+    /// Paid this many lamports now, and measured.
+    Pay(u64),
+    /// Measured (and marked for the round) with nothing to pay: under the least hold, the round
+    /// measures only, or its share is under the least payout.
+    Touch,
+    /// Left alone: it earns at least the least payout this round, but this step cannot pay it
+    /// (the step's budget, the per-holding cap or the pile is used up). The keeper brings it
+    /// again next step.
+    Skip,
+}
+
+/// What a holding of weight `w` earns this round: its share of the budget by the previous round's
+/// total, never over what the round's budget has left. 0 when the round measures only (`w_prev`
+/// 0) or the weight is 0.
+pub fn earned(r: &Round, w: u128) -> u64 {
     if w == 0 || r.w_prev == 0 {
         return 0;
     }
-    let pay = share(r.budget, w, r.w_prev)
-        .min(r.budget.saturating_sub(r.paid))
-        .min(holder_pile)
-        .min(step_left)
-        .min(holding_cap);
-    if pay < MIN_PAYOUT_LAMPORTS {
-        0
+    share(r.budget, w, r.w_prev).min(r.budget.saturating_sub(r.paid))
+}
+
+/// The step's decision for a holding of weight `w`: what it earns, if under the least payout a
+/// touch; else paid in full when the step's remaining budget, the per-holding cap and the holder
+/// pile cover it, else skipped for a later step.
+pub fn decide(r: &Round, w: u128, holder_pile: u64, step_left: u64, holding_cap: u64) -> Decision {
+    let due = earned(r, w);
+    if due < MIN_PAYOUT_LAMPORTS {
+        return Decision::Touch;
+    }
+    if due <= step_left && due <= holding_cap && due <= holder_pile {
+        Decision::Pay(due)
     } else {
-        pay
+        Decision::Skip
+    }
+}
+
+/// [`decide`] as a plain amount: a pay, else 0. Kept for the host tests of the round math.
+pub fn due(r: &Round, w: u128, holder_pile: u64, step_left: u64, holding_cap: u64) -> u64 {
+    match decide(r, w, holder_pile, step_left, holding_cap) {
+        Decision::Pay(x) => x,
+        _ => 0,
     }
 }

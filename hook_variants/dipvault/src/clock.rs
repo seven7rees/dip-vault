@@ -12,7 +12,9 @@
 //! offset 21 : paid        u64  lamports paid to this holding by the companion, all time
 //! offset 29 : entered_at  i64  when the holding last went from empty to funded
 //! offset 37 : flags       u8   bit 0: sold into the pool since `entered_at`
-//! offset 38 : reserved    26 bytes, zero
+//! offset 38 : measured    u64  the balance when the companion last recorded a payout (a touch or
+//!                              a payment); the companion script pays next round by at most this
+//! offset 46 : reserved    18 bytes, zero
 
 use bordrless_hook::HOOK_DATA_LEN;
 
@@ -39,7 +41,8 @@ pub mod record_offsets {
     pub const PAID: usize = 21;
     pub const ENTERED_AT: usize = 29;
     pub const FLAGS: usize = 37;
-    pub const RESERVED: usize = 38;
+    pub const MEASURED: usize = 38;
+    pub const RESERVED: usize = 46;
 }
 
 /// A holding's record, as the hook data lays it out.
@@ -52,6 +55,7 @@ pub struct Record {
     pub paid: u64,
     pub entered_at: i64,
     pub flags: u8,
+    pub measured: u64,
 }
 
 fn u64_at(data: &[u8], at: usize) -> u64 {
@@ -74,6 +78,7 @@ impl Record {
             paid: u64_at(data, o::PAID),
             entered_at: u64_at(data, o::ENTERED_AT) as i64,
             flags: data[o::FLAGS],
+            measured: u64_at(data, o::MEASURED),
         }
     }
 
@@ -88,6 +93,7 @@ impl Record {
         out[o::PAID..o::PAID + 8].copy_from_slice(&self.paid.to_le_bytes());
         out[o::ENTERED_AT..o::ENTERED_AT + 8].copy_from_slice(&self.entered_at.to_le_bytes());
         out[o::FLAGS] = self.flags;
+        out[o::MEASURED..o::MEASURED + 8].copy_from_slice(&self.measured.to_le_bytes());
         out
     }
 
@@ -145,6 +151,7 @@ pub fn on_receive(r: &mut Record, amount: u64, old_balance: u64, now: i64) {
         paid: if fresh { 0 } else { r.paid },
         entered_at: if fresh { now } else { r.entered_at },
         flags: if fresh { 0 } else { r.flags },
+        measured: if fresh { 0 } else { r.measured },
     };
 }
 

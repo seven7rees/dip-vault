@@ -269,8 +269,9 @@ pub mod dipvault_hook {
     }
 
     /// The companion program's payout authority alone: records `lamports` paid to `holding` (0: a
-    /// touch, the holding measured) in round `tag`. The holding is of this mint and its owner may
-    /// hold a record; the record is written through the token program.
+    /// touch, the holding measured) in round `tag`, and the holding's balance as measured. The
+    /// holding is of this mint and its owner may hold a record; the record is written through the
+    /// token program.
     pub fn record_payout(ctx: Context<RecordPayout>, lamports: u64, tag: u32) -> Result<()> {
         let mint_key = ctx.accounts.mint.key();
         let holding = read_holding(&ctx.accounts.holding).ok_or(HookError::WrongAccount)?;
@@ -284,6 +285,7 @@ pub mod dipvault_hook {
         require!(r.is_set(), HookError::NoRecord);
         r.paid = r.paid.checked_add(lamports).ok_or(HookError::MathOverflow)?;
         r.round = tag;
+        r.measured = holding.amount;
         state.paid_total = state.paid_total.saturating_add(lamports);
         state.records = state.records.saturating_add(1);
         write_own_hook_data(

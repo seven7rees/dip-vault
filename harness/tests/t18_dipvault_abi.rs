@@ -217,6 +217,12 @@ fn builder_wallet_is_the_wallet_file_and_the_keeper_names_it() {
     assert!(flat.contains("\"payouts\":true"), "the companion's payout accounts come first");
     assert!(flat.contains("\"mintWritable\":false"), "nothing is burned: the mint need not be writable");
     assert!(flat.contains("\"stepSecs\":300"));
+    // The companion's step and holding caps stay open: the script's own piles bound every payout,
+    // and a lower step cap would strand a holder whose weekly share exceeds it (skipped for ever,
+    // found by T9 2026-10-21). One holder a step is what fits one transaction (T9 measures it).
+    assert!(flat.contains("\"stepBps\":10000,\"holdingBps\":10000,\"windowBps\":10000,\"windowSecs\":86400"));
+    assert!(flat.contains("\"withSwapAccounts\":1"));
+    assert!(flat.contains("\"roundSecs\":604800"));
     assert!(flat.contains("\"stateLen\":320"));
     assert!(flat.contains("\"offset\":1,\"width\":4,\"compare\":\"ne\",\"against\":{\"epoch\":{\"secs\":604800"), "the round field, not this week's epoch");
     assert_eq!(dipvault_script::params::DIP.step_secs, 300, "DIP.step_secs equals keeper stepSecs");

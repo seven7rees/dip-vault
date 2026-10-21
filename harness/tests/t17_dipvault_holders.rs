@@ -1,7 +1,7 @@
 //! T17 — Dip Vault script: the weekly holder payouts (DIP-VAULT.md item 5): weights, rounds,
 //! what a holding is due, and that a wallet that sells before 6 hours earns nothing.
 
-use dipvault_script::holders::{due, held_since_round_start, roll, round_of, round_start, Round};
+use dipvault_script::holders::{decide, due, earned, held_since_round_start, roll, round_of, round_start, Decision, Round};
 use dipvault_script::params::{MIN_HOLD_SECS, MIN_PAYOUT_LAMPORTS, NEVER_SOLD_BONUS_BPS, ROUND_SECS};
 use dipvault_script::record::{tier_bps, weight, Record, FLAG_SOLD};
 
@@ -18,6 +18,7 @@ fn rec(held: i64, amount: u64, sold: bool) -> Record {
         paid: 0,
         entered_at: NOW - held,
         flags: if sold { FLAG_SOLD } else { 0 },
+        measured: amount,
     }
 }
 
@@ -75,9 +76,9 @@ fn what_a_holding_is_due() {
     assert_eq!(due(&r, 0, u64::MAX, u64::MAX, u64::MAX), 0);
     let first = Round { w_prev: 0, ..r };
     assert_eq!(due(&first, 100, u64::MAX, u64::MAX, u64::MAX), 0, "the first round measures only");
-    assert_eq!(due(&r, 100, 300_000, u64::MAX, u64::MAX), 300_000, "never over the holder pile");
-    assert_eq!(due(&r, 100, u64::MAX, 250_000, u64::MAX), 250_000, "never over the step's budget");
-    assert_eq!(due(&r, 100, u64::MAX, u64::MAX, 200_000), 200_000, "never over the holding cap");
+    assert_eq!(due(&r, 100, 300_000, u64::MAX, u64::MAX), 0, "the pile cannot cover it: skipped, paid later, never cut");
+    assert_eq!(due(&r, 100, u64::MAX, 250_000, u64::MAX), 0, "the step's budget cannot: skipped");
+    assert_eq!(due(&r, 100, u64::MAX, u64::MAX, 200_000), 0, "over the holding cap: skipped");
     let spent = Round { paid: 9_950_000, ..r };
     assert_eq!(due(&spent, 100, u64::MAX, u64::MAX, u64::MAX), 0, "under the least payout: a touch");
     assert_eq!(due(&spent, 500, u64::MAX, u64::MAX, u64::MAX), 0, "what the budget has left is under the least payout");
@@ -151,4 +152,61 @@ fn only_coins_held_since_before_the_round_began_count() {
     assert!(held_since_round_start(start + 1, r + 1, ROUND_SECS), "and counts next week");
     assert!(held_since_round_start(i64::MIN, u32::MAX, ROUND_SECS), "no overflow");
     assert!(!held_since_round_start(i64::MAX, 0, ROUND_SECS));
+}
+
+#[test]
+fn a_step_out_of_budget_skips_a_holder_instead_of_marking_it_paid_nothing() {
+    // Review finding (2026-10-21): the paying step marked holders beyond its budget as done with
+    // 0 lamports, locking them out for the week.
+    let r = Round { round: 11, w_prev: 1_000, w_cur: 0, budget: 10_000_000, paid: 0, measured: 0 };
+    assert_eq!(earned(&r, 100), 1_000_000);
+    assert_eq!(decide(&r, 100, u64::MAX, u64::MAX, u64::MAX), Decision::Pay(1_000_000));
+    assert_eq!(decide(&r, 100, u64::MAX, 999_999, u64::MAX), Decision::Skip, "the step's budget is used up: wait");
+    assert_eq!(decide(&r, 100, u64::MAX, u64::MAX, 999_999), Decision::Skip, "over the holding cap: wait");
+    assert_eq!(decide(&r, 100, 999_999, u64::MAX, u64::MAX), Decision::Skip, "the pile cannot cover it: wait");
+    assert_eq!(decide(&r, 0, u64::MAX, u64::MAX, u64::MAX), Decision::Touch, "no weight: measured, nothing due");
+    assert_eq!(decide(&r, 5, u64::MAX, u64::MAX, u64::MAX), Decision::Touch, "under the least payout: a touch");
+    let first = Round { w_prev: 0, ..r };
+    assert_eq!(decide(&first, 100, u64::MAX, u64::MAX, u64::MAX), Decision::Touch, "a measuring round");
+    let spent = Round { paid: 10_000_000, ..r };
+    assert_eq!(decide(&spent, 100, u64::MAX, u64::MAX, u64::MAX), Decision::Touch, "the round's budget is gone: nothing earned");
+    // The paying loop as the script runs it: eight holders of equal weight, a step budget of
+    // 20% of a 10 SOL pot. Two are paid, six are skipped, none is marked.
+    let mut round = Round { round: 11, w_prev: 8_000, w_cur: 0, budget: 3_333_000_000, paid: 0, measured: 0 };
+    let mut step_left = 2_000_000_000u64;
+    let (mut paid, mut skipped, mut touched) = (0, 0, 0);
+    for _ in 0..8 {
+        match decide(&round, 1_000, 3_333_000_000, step_left, u64::MAX) {
+            Decision::Pay(x) => { paid += 1; step_left -= x; round.paid += x; round.measured += 1; }
+            Decision::Skip => skipped += 1,
+            Decision::Touch => touched += 1,
+        }
+    }
+    assert_eq!((paid, skipped, touched), (4, 4, 0), "416,625,000 each: four fit in a 2 SOL step, four wait");
+    assert_eq!(round.measured, 4, "only the paid ones are marked");
+}
+
+#[test]
+fn shares_paid_the_round_after_never_add_up_past_the_budget() {
+    // Measured at a round's first second; paid the next round with the same basis (hold time at
+    // that first second, balance capped at the measured one), whatever grew in between.
+    let start = round_start(round_of(NOW, ROUND_SECS), ROUND_SECS);
+    let wallets = [(1_000_000u64, 2 * DAY), (500_000, 10 * DAY), (100_000, 40 * DAY), (2_000_000, 7 * 3_600)];
+    let mut w_prev = 0u128;
+    let mut recs = Vec::new();
+    for (amount, held) in wallets {
+        let r = Record { stamp: start - held, measured: amount, ..rec(held, amount, false) };
+        w_prev += weight(&r, amount, start);
+        recs.push(r);
+    }
+    // A week later every wallet is older (tiers rose) and two doubled their balance.
+    let mut paid = 0u64;
+    let budget = 10_000_000u64;
+    for (i, r) in recs.iter().enumerate() {
+        let balance_now = if i % 2 == 0 { r.measured * 2 } else { r.measured };
+        let w = weight(r, balance_now.min(r.measured), start);
+        paid += (budget as u128 * w / w_prev) as u64;
+    }
+    assert!(paid <= budget, "{paid} of {budget}");
+    assert!(paid >= budget - 4, "and nearly all of it: {paid}");
 }

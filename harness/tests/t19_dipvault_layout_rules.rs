@@ -168,7 +168,7 @@ fn script_state_is_320_bytes_at_its_offsets() {
     assert_eq!(&d[225..], &[0u8; 95][..]);
     // keeper.json `view` reads these offsets live on the coin's page.
     let keeper = include_str!("../../script_variants/dipvault/keeper.json").replace([' ', '\n'], "");
-    for (label, offset) in [("Dippile", 57), ("Holderpile", 65), ("Liquiditypile", 73), ("Paidtoholders", 193), ("CoinsheldforLP", 89), ("Liquiditylocked(SOL)", 201)] {
+    for (label, offset) in [("Dippile", 57), ("Holderpile", 65), ("Liquiditypile", 73), ("Paidtoholders", 193), ("CoinsheldforLP", 89), ("SOLintoliquidity", 201)] {
         assert!(keeper.contains(&format!("\"label\":\"{label}\",\"account\":\"script\",\"offset\":{offset},\"width\":8")), "view {label} at {offset}");
     }
 }
@@ -235,14 +235,29 @@ fn the_script_keeps_the_common_rules() {
     assert!(hook_bytes <= 120_000);
 }
 
+/// The Workshop's three forbidden words, as whole words, with the one allowed phrase removed
+/// first; over every text that ships or is sent out.
 #[test]
-fn never_audited_safe_or_guaranteed() {
-    for src in HOOK_SOURCES.iter().chain(SCRIPT_SOURCES.iter()).chain([include_str!("../../variants/dipvault/notes.txt")].iter()) {
-        let lower = src.to_lowercase();
-        for word in ["audited", " safe", "guaranteed"] {
-            assert!(!lower.contains(word) || lower.contains("not audited"), "found `{word}`");
+fn never_the_three_forbidden_words() {
+    let texts: Vec<&str> = HOOK_SOURCES
+        .iter()
+        .chain(SCRIPT_SOURCES.iter())
+        .copied()
+        .chain([
+            include_str!("../../variants/dipvault/notes.txt"),
+            include_str!("../../script_variants/dipvault/keeper.json"),
+            include_str!("../../DIP-VAULT-FORMAT-NOTE.txt"),
+        ])
+        .collect();
+    for src in texts {
+        let lower = src.to_lowercase().replace("not audited", "");
+        let words: Vec<String> = lower
+            .split(|c: char| !c.is_alphanumeric())
+            .filter(|w| !w.is_empty())
+            .map(str::to_string)
+            .collect();
+        for forbidden in ["audited", "safe", "guaranteed"] {
+            assert!(!words.iter().any(|w| w == forbidden), "found `{forbidden}`");
         }
-        assert!(!lower.contains("guaranteed"));
-        assert!(!lower.contains(" safe "));
     }
 }

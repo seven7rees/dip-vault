@@ -24,7 +24,9 @@ use bordrless_program_tests::env::Tx;
 use bordrless_program_tests::fixture::World;
 use bordrless_program_tests::launch::*;
 use bordrless_program_tests::timelock::programdata_hash;
-use bordrless_swap::events::LiquidityAdded;
+use bordrless_swap::events::{LiquidityAdded, Swapped};
+use bordrless_program_tests::launch::protocol_lookup_table;
+use dipvault_script::params::{DIP_THIRD_BPS, HOLDER_THIRD_BPS, MIN_PAYOUT_LAMPORTS};
 use bordrless_token::client as token;
 use dipvault_hook::clock::Record;
 use dipvault_script::params::BUILDER_WALLET;
@@ -133,7 +135,7 @@ fn launch_pair(w: &mut World, launcher: &Keypair) -> Pubkey {
                 state_len: 320,
                 init_data: vec![],
             },
-            PayoutTermsArgs { step_bps: 2_000, holding_bps: 10_000, window_bps: 10_000, window_secs: 86_400 },
+            PayoutTermsArgs { step_bps: 10_000, holding_bps: 10_000, window_bps: 10_000, window_secs: 86_400 },
             vec![],
         ),
         companion::allow_wallet_payouts(m),
@@ -197,9 +199,11 @@ fn hook_state(w: &World, mint: &Pubkey) -> dipvault_hook::HookState {
     w.env.read(&Pubkey::find_program_address(&[b"state", mint.as_ref()], &HOOK).0)
 }
 
-/// The accounts a keeper's step brings: the companion's payout accounts, the swap's accounts
-/// (the pool, its vaults, the creator's holdings, the hook slice, the SOL cut's), the liquidity
-/// add's, the builder wallet, then the candidate holdings with their owners (all writable).
+/// The accounts a keeper's step brings, as the live docs describe them: the companion's payout
+/// accounts, the launch pool's swap accounts for the companion address (the pool, its vaults, the
+/// creator's holdings, the hook slice; the companion's own trades are exempt from the SOL cut, so
+/// no quote-cut extras), the pool's quote vault (the liquidity add's), the builder wallet, then
+/// the candidate holdings with their owners (all writable).
 fn step_extras(w: &World, mint: &Pubkey, holders: &[Pubkey]) -> Vec<AccountMeta> {
     let creator = companion::creator_address(mint);
     let l = w.launch(mint);
@@ -211,20 +215,12 @@ fn step_extras(w: &World, mint: &Pubkey, holders: &[Pubkey]) -> Vec<AccountMeta>
             extras.push(AccountMeta { is_signer: false, ..m });
         }
     };
-    for m in swap_ix(w, &creator, mint, true, 1).accounts {
+    let slice = w.launch_base_slice(mint, &creator, &creator, true);
+    let swap = launch::swap_v2_with_base_slice(&w.launch_keys(mint), creator, creator, 1, 1, 0, slice);
+    for m in swap.accounts {
         push(m, &mut extras);
     }
-    let keys = dipvault_script::liquidity::AddKeys {
-        provider: creator,
-        pool: l.pool,
-        mint: *mint,
-        quote_mint: l.quote_mint,
-        lp_holding: l.lp_holding,
-    };
-    let slice = dipvault_script::hook_slice(Some(HOOK), mint, &l.pool);
-    for m in dipvault_script::liquidity::add_liquidity(&keys, 1, 1, 1, slice).accounts {
-        push(m, &mut extras);
-    }
+    push(AccountMeta::new(token::holding_address(&l.quote_mint, &l.pool), false), &mut extras);
     push(AccountMeta::new(BUILDER_WALLET, false), &mut extras);
     for h in holders {
         push(AccountMeta::new(token::holding_address(mint, h), false), &mut extras);
@@ -236,18 +232,21 @@ fn step_extras(w: &World, mint: &Pubkey, holders: &[Pubkey]) -> Vec<AccountMeta>
 fn step(w: &mut World, cranker: &Keypair, mint: &Pubkey, holders: &[Pubkey]) -> Tx {
     let extras = step_extras(w, mint, holders);
     let ix = companion::script_step(cranker.pubkey(), &LaunchKeys::of(&w.launch(mint)), SCRIPT, extras);
-    w.env.send_paid_by(&[ix], cranker, &[])
+    let tx = w.env.send_paid_by(&[ix], cranker, &[]);
+    if tx.result.is_ok() {
+        piles_equal_pot(w, mint);
+    }
+    tx
 }
 
-/// Steps until one answers holder payouts (at most `tries`, a step interval apart): a step whose
-/// turn is the liquidity add yields the next one to the holders.
-fn payout_step(w: &mut World, cranker: &Keypair, mint: &Pubkey, holders: &[Pubkey], tries: usize) -> (Tx, Vec<ScriptPayout>) {
+/// Steps until one is a payout turn (no liquidity added), at most `tries`, a step interval apart.
+fn payout_turn(w: &mut World, cranker: &Keypair, mint: &Pubkey, holders: &[Pubkey], tries: usize) -> Tx {
     for i in 0..tries {
         let tx = step(w, cranker, mint, holders);
         assert!(tx.result.is_ok(), "{}", tx.logs().join("\n"));
-        let events: Vec<ScriptPayout> = tx.events();
-        if !events.is_empty() || i + 1 == tries {
-            return (tx, events);
+        if tx.events::<LiquidityAdded>().is_empty() || i + 1 == tries {
+            assert!(tx.events::<LiquidityAdded>().is_empty(), "no payout turn in {tries} steps");
+            return tx;
         }
         w.env.warp(300);
     }
@@ -285,17 +284,27 @@ fn t9_the_whole_story() {
     assert!(ra.is_set() && ra.stamp == w.env.now && ra.amount == w.env.holding(&mint, &a.pubkey()), "{ra:?}");
     w.env.warp(60);
     buy(&mut w, &b, &mint, SOL).ok();
+    let b_bought_at = w.env.now;
     buy(&mut w, &c, &mint, SOL / 2).ok();
+    w.env.warp(120);
 
-    // An early sell pays the brake: the launch's SOL-cut total grows. A late one pays nothing.
+    // An early sell pays the brake: exactly 80 bps of the SOL out the launchpad was told
+    // (`Swapped.amount_out`), rounded down. A sell after 10 minutes pays nothing.
     let accrued0 = w.launch(&mint).quote_cut_accrued();
     let held_b = w.env.holding(&mint, &b.pubkey());
-    sell(&mut w, &b, &mint, held_b / 10).ok();
+    let tx = sell(&mut w, &b, &mint, held_b / 10);
+    tx.ok();
+    let swapped: Swapped = tx.event();
     let accrued1 = w.launch(&mint).quote_cut_accrued();
-    assert!(accrued1 > accrued0, "the brake took SOL: {accrued0} -> {accrued1}");
+    let cut = accrued1 - accrued0;
+    // The launchpad is told the SOL out after the DEX's 0.3% LP fee (`docs/hooks-v2.md` §3.1), so
+    // the cut is 80 bps of a little under the event's `amount_out`: between 79 and 80 bps of it.
+    let bps = cut * 10_000 / swapped.amount_out;
+    assert!((79..=80).contains(&bps), "the brake is 80 bps of the SOL out: {cut} of {} is {bps} bps", swapped.amount_out);
+    assert!(cut > 0);
     let rb = record_of(&w, &mint, &b.pubkey());
     assert!(rb.sold(), "b's record carries the sold flag");
-    assert_eq!(rb.stamp, w.env.now - 0, "a sell keeps the clock (b bought this second)");
+    assert_eq!(rb.stamp, b_bought_at, "a sell keeps the clock");
     w.env.warp(601);
     let held_a = w.env.holding(&mint, &a.pubkey());
     sell(&mut w, &a, &mint, held_a / 10).ok();
@@ -342,34 +351,59 @@ fn t9_the_whole_story() {
     assert!(tx.events::<ScriptWalletPayout>().len() == 1, "no builder payout; state {s1:?}\n{}", tx.logs().join("\n"));
     let paid: ScriptWalletPayout = tx.event();
     assert_eq!(paid.to, BUILDER_WALLET);
-    assert!(w.env.lamports(&BUILDER_WALLET) > builder_before);
+    assert_eq!(w.env.lamports(&BUILDER_WALLET) - builder_before, paid.lamports);
+    // The split, exactly: the pool holds under 5 SOL of real SOL, so the builder's share is 1%;
+    // the rest in 3,333 / 3,333 / 3,334; the step's bounty (2,500 for a one-entry answer) comes
+    // out of the dip pile; the builder is paid what the terms allow of what is owed.
+    assert!(w.launch_pool(&mint).quote_reserve < 5 * SOL);
+    let builder = pot0 * 100 / 10_000;
+    let rest = pot0 - builder;
+    let dip = (rest as u128 * u128::from(DIP_THIRD_BPS) / 10_000) as u64;
+    let holders_share = (rest as u128 * u128::from(HOLDER_THIRD_BPS) / 10_000) as u64;
+    let lp = rest - dip - holders_share;
     let s1 = state_of(&w, &mint);
-    assert!(s1.dip_pile > 0 && s1.holder_pile > 0 && s1.lp_pile > 0, "{s1:?}");
+    assert_eq!(s1.owed + paid.lamports, builder, "the builder's 1%: paid plus still owed");
+    assert_eq!(s1.dip_pile, dip - SCRIPT_BOUNTY / 8, "the dip third less the step's bounty");
+    assert_eq!(s1.holder_pile, holders_share);
+    assert_eq!(s1.lp_pile, lp);
     assert_eq!(s1.steps, 1);
-    piles_equal_pot(&w, &mint);
 
     // A dip: a whale pumps the price, steps raise the reference toward it (5% a step), then the
     // whale dumps: the price lands well under the reference and the next step buys and keeps.
     let whale = w.env.funded(100 * SOL);
     buy(&mut w, &whale, &mint, 20 * SOL).ok();
+    let ref_before = state_of(&w, &mint).ref_price;
     for _ in 0..8 {
         w.env.warp(300);
         let tx = step(&mut w, &cranker, &mint, &[]);
         assert!(tx.result.is_ok(), "{}", tx.logs().join("\n"));
     }
     let s1 = state_of(&w, &mint);
+    assert!(s1.ref_price > ref_before, "the reference rose toward the pumped price: {ref_before} -> {}", s1.ref_price);
     w.env.warp(601);
     let held_w = w.env.holding(&mint, &whale.pubkey());
     sell(&mut w, &whale, &mint, held_w).ok();
     claim(&mut w, &cranker, &mint).ok();
     let held_before = w.env.holding(&mint, &companion::creator_address(&mint));
+    let pot_before_dip = companion_of(&w, &mint).pending_pot;
+    let real_sol_before = w.launch_pool(&mint).quote_reserve;
     let tx = step(&mut w, &cranker, &mint, &[]);
     tx.ok();
     println!("T9 dip-buy step: {} CU, {} instructions, height {}", tx.cu(), tx.trace_len(), tx.max_height());
     let s2 = state_of(&w, &mint);
     assert!(s2.tokens_held > 0, "the dip buy kept coins: {s2:?}\n{}", tx.logs().join("\n"));
     assert_eq!(w.env.holding(&mint, &companion::creator_address(&mint)) - held_before, s2.tokens_held);
-    assert!(s2.dip_pile < s1.dip_pile + (s2.last_pot - s1.last_pot), "the dip pile paid for it");
+    // The dip pile paid for exactly the buy: the pile grew by its third of the new money, then
+    // lost the SOL spent and the step's flat bounty (no answer on a trading step).
+    let new_money = pot_before_dip - s1.last_pot;
+    let dip_share = ((new_money - new_money * 100 / 10_000) as u128 * u128::from(DIP_THIRD_BPS) / 10_000) as u64;
+    // The bounty: a flat 20,000 on a step with no answer, 2,500 when it also paid the builder.
+    let bounty = if tx.events::<ScriptWalletPayout>().is_empty() { SCRIPT_BOUNTY } else { SCRIPT_BOUNTY / 8 };
+    let spent = s1.dip_pile + dip_share - bounty - s2.dip_pile;
+    let swapped: Swapped = tx.event();
+    assert_eq!(spent, swapped.amount_in, "the dip pile paid the buy: {spent} vs {}", swapped.amount_in);
+    assert!(spent <= real_sol_before / 100, "at most 1% of the pool's real SOL: {spent} of {real_sol_before}");
+    assert!(spent > 0);
     piles_equal_pot(&w, &mint);
 
     // Graduation: fresh wallets buy the curve, the last one graduates it.
@@ -409,58 +443,159 @@ fn t9_the_whole_story() {
     let s3 = state_of(&w, &mint);
     let lp_after = w.env.holding(&w.launch_pool(&mint).lp_mint, &launch::launch_address(&mint));
     assert!(s3.lp_minted > 0 && lp_after == lp_before + s3.lp_minted, "LP minted into the launch's holding: {s3:?}\n{}", tx.logs().join("\n"));
-    let _added: LiquidityAdded = tx.event();
-    assert!(s3.tokens_held < s2.tokens_held || s3.tokens_held == 0, "coins paired");
+    let added: LiquidityAdded = tx.event();
+    assert_eq!(added.lp_minted, s3.lp_minted);
+    // The pair is at the pool's ratio before the add (the reserves the event reports less what it
+    // added), rounded up on the quote side as the DEX pulls it, and no wrapped SOL is left behind.
+    let base_before = added.base_reserve - added.base_amount;
+    let quote_before = added.quote_reserve - added.quote_amount;
+    // Either every coin offered was paired (quote = ceil(base * Q / B)) or the SOL budget bound
+    // the add (base = ceil(quote * B / Q)): the DEX's two branches of `lp_for_deposit`.
+    let by_base = dipvault_script::math::ceil_ratio(added.base_amount, quote_before, base_before).unwrap();
+    let by_quote = dipvault_script::math::ceil_ratio(added.quote_amount, base_before, quote_before).unwrap();
+    assert!(
+        added.quote_amount == by_base || added.base_amount == by_quote,
+        "the pair is at the pool's ratio: base {} quote {} (ceil by base {by_base}, ceil by quote {by_quote})",
+        added.base_amount,
+        added.quote_amount
+    );
+    assert_eq!(w.env.holding(&w.sol, &companion::creator_address(&mint)), 0, "no wrapped SOL stranded");
+    assert_eq!(s2.tokens_held - s3.tokens_held, added.base_amount, "the coins held were paired");
+    assert!(tx.events::<Swapped>().is_empty(), "the pot held enough coins: no shortfall buy");
     piles_equal_pot(&w, &mint);
 
     // Holder payouts: a new week, the step measures the holders (touches); the week after, pays.
     let week = |t: i64| (t / WEEK) as u32;
-    // Five more holders, so a paying step carries eight entries (PAYOUT_MAX_ENTRIES).
+    // Six more holders; e is the ninth,
+    // left out of the batches and used later.
     let mut more = Vec::new();
-    for _ in 0..5 {
+    for _ in 0..6 {
         let h = w.env.funded(5 * SOL);
         buy(&mut w, &h, &mint, SOL / 4).ok();
         more.push(h);
     }
+    let e = more.pop().unwrap();
     let to_next_week = WEEK - (w.env.now % WEEK) + 1;
     w.env.warp(to_next_week);
-    buy(&mut w, &c, &mint, SOL / 10).ok();
-    claim(&mut w, &cranker, &mint).ok();
     buy(&mut w, &c, &mint, SOL / 20).ok();
     claim(&mut w, &cranker, &mint).ok();
     let mut holders = vec![a.pubkey(), b.pubkey(), c.pubkey()];
     holders.extend(more.iter().map(|h| h.pubkey()));
-    let (tx, touches) = payout_step(&mut w, &cranker, &mint, &holders, 2);
-    assert_eq!(touches.len(), 8, "eight holders measured\n{}", tx.logs().join("\n"));
-    println!("T9 measuring step (8 touches): {} CU, {} instructions in the trace, height {}", tx.cu(), tx.trace_len(), tx.max_height());
-    assert!(touches.iter().all(|p| p.lamports == 0), "week one measures only");
+    assert_eq!(holders.len(), 8);
+    // e is measured in week one with the others, but paid only in the z step of week two.
+    let mut measured_set = holders.clone();
+    measured_set.push(e.pubkey());
+    // How many holders a step fits in one transaction beside the protocol's lookup table: the
+    // keeper brings at most keeper.json's perStep and fewer when a step would not fit.
+    // The protocol's lookup table as it is on mainnet (4vxVcYLdkqT1rMfGHjAu4kMa9XSEhUdQU5ThVfU5grGQ,
+    // read 2026-10-21): the fixture's 18 plus the launchpad, the DEX, the token program and one more.
+    let live: [&str; 22] = [
+        "69vhpnkYjtiJgdfU7QsA5Ww7V8FWtvPcZ2r4znuyByvq",
+        "C2Y3B3hZTesJQqLYrZ7qoaZUoRmwYWh5Qh3MuFxruouE",
+        "9cBz2tsg7FwopSsd6HzvtbiL6b7B46eLG436etkB7cyx",
+        "6Ztfr97cUewdViXDXdZUsQq4pz7MYdygvK1WijALjZ5q",
+        "2XLvgczuVACmvvjfRLLAcLwMzFHutbAAro61zZKP8fsx",
+        "EiUK62AP8DwUJWBosf7Ceyih3sGAicZxmsmcBftHzM8n",
+        "Dwf4C8tTMYwicp8cU5MYcTtMQVVJTN7W3LcXCQ1UEhMs",
+        "3ta59VvLDKLnCKMhYihiC3fQ7W9jPKty6xfx3h5puHGS",
+        "EAcZR2i8A6BbnKRdWuyMVDTuiNkD6qc4RkFpxUYJ9Qba",
+        "6ogQR9x8o86egutFri8ev6Kx6reTDg8YdwPmvkW29efh",
+        "3dfEZLdjRcpTJ4RxPzgkqnqaG2FipRdaHgRW72AL6kqL",
+        "5n25iAaXFsjs4UgGQM6fCiRhaQcCVQ1L5BgyRZ7UrmaE",
+        "9abhxVTuwck5Ux79act3e2Vkfem7Q4zBwATMctUvHvuE",
+        "2repKA1JgDkBo4AffscVee342dcBcH6c2yfpUTRrAiEN",
+        "14RJQXPdJfkehit6ezktjd3xujamf8nVSKw2shKamaEH",
+        "A49oVhX22ExMwTEtFC6Y8nhBdZ4LJDGhdXLDn4c2f59i",
+        "11111111111111111111111111111111",
+        "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+        "7QuoYRuD9MHzX5EN7qqj62iwNPVqfy74RzmwJ524cgDt",
+        "1jcBymHxBjniZDhNPy51Vgm5Nz7pLUdxa9UBHc4TavC",
+        "GyzKSnnEu2uN5bBRecE4XYY2enbfR2D2MtxnbJPGy7hk",
+        "2XoEWp8cF3kRXg74eVwPAyTFhVCAztn3V88komxAvr22",
+    ];
+    let table = {
+        let mut addresses = protocol_lookup_table(&w);
+        for a in live {
+            let k: Pubkey = a.parse().unwrap();
+            if !addresses.contains(&k) {
+                addresses.push(k);
+            }
+        }
+        w.env.put_lookup_table(Pubkey::new_unique(), &addresses)
+    };
+    let mut fit = 0usize;
+    for n in 1..=4 {
+        let extras = step_extras(&w, &mint, &holders[..n]);
+        let ix = companion::script_step(cranker.pubkey(), &LaunchKeys::of(&w.launch(&mint)), SCRIPT, extras);
+        let statics = ix.accounts.iter().filter(|m| !table.addresses.contains(&m.pubkey)).map(|m| m.pubkey).collect::<std::collections::HashSet<_>>().len();
+        let size = w.env.v0_size(&[ix], &cranker, &[], &[table.clone()]);
+        println!("T9 {n}-holder step: {size} bytes as v0 with the protocol table (limit 1,232), {statics} static keys");
+        if size <= 1_232 {
+            fit = n;
+        }
+    }
+    assert!(fit >= 1, "at least one holder a step must fit one transaction");
+    let keeper = include_str!("../../script_variants/dipvault/keeper.json").replace([' ', '\n'], "");
+    assert!(keeper.contains(&format!("\"withSwapAccounts\":{fit}")), "keeper.json perStep must be what fits: {fit}");
+    let batch_size = fit;
+    // Week one: every holder measured once, `batch_size` a step, touches only.
+    let mut touched = 0;
+    let mut steps_used = 0;
+    while touched < 9 {
+        let batch: Vec<Pubkey> = measured_set.iter().copied().filter(|h| record_of(&w, &mint, h).round != week(w.env.now)).take(batch_size).collect();
+        let tx = payout_turn(&mut w, &cranker, &mint, &batch, 2);
+        let events: Vec<ScriptPayout> = tx.events();
+        assert!(!events.is_empty(), "{}", tx.logs().join("\n"));
+        assert!(events.iter().all(|p| p.lamports == 0), "week one measures only");
+        touched += events.len();
+        steps_used += 1;
+        assert!(steps_used <= 10);
+        w.env.warp(300);
+    }
+    println!("T9 measuring: {touched} touches in {steps_used} steps");
     let r = week(w.env.now);
-    assert!(holders.iter().all(|h| record_of(&w, &mint, h).round == r), "the hook recorded the round");
+    assert!(measured_set.iter().all(|h| record_of(&w, &mint, h).round == r), "the hook recorded the round");
+    assert!(measured_set.iter().all(|h| record_of(&w, &mint, h).measured == w.env.holding(&mint, h)), "and the balance measured");
     let s4 = state_of(&w, &mint);
-    assert!(s4.w_cur > 0 && s4.round == r, "{s4:?}");
-    piles_equal_pot(&w, &mint);
-    // The same holders in the same week are not paid or measured again.
-    w.env.warp(300);
-    let tx = step(&mut w, &cranker, &mint, &holders);
-    assert!(tx.result.is_ok(), "{}", tx.logs().join("\n"));
+    assert!(s4.w_cur > 0 && s4.round == r && s4.measured == 9, "{s4:?}");
+    // The same holders in the same week are not paid or measured again (on a payout turn).
+    let tx = payout_turn(&mut w, &cranker, &mint, &holders[..batch_size], 2);
     assert!(tx.events::<ScriptPayout>().is_empty(), "nothing twice in a round");
-    // Next week: paid by weight.
+    // Next week: every holder is paid by weight, four a step, over as many steps as the step
+    // budget (20% of the pot a step) needs; none is marked with 0 along the way.
     w.env.warp(WEEK);
     buy(&mut w, &c, &mint, SOL / 10).ok();
     claim(&mut w, &cranker, &mint).ok();
     let before: Vec<u64> = holders.iter().map(|h| w.env.lamports(h)).collect();
-    let (tx, pays) = payout_step(&mut w, &cranker, &mint, &holders, 2);
-    assert_eq!(pays.len(), 8, "{}", tx.logs().join("\n"));
-    println!("T9 paying step (8 payouts): {} CU, {} instructions in the trace, height {}", tx.cu(), tx.trace_len(), tx.max_height());
+    let mut pays: Vec<ScriptPayout> = Vec::new();
+    let mut steps_used = 0;
+    let week2 = week(w.env.now);
+    while pays.len() < 8 {
+        let batch: Vec<Pubkey> = holders.iter().copied().filter(|h| record_of(&w, &mint, h).round != week2).take(batch_size).collect();
+        assert!(!batch.is_empty());
+        let tx = payout_turn(&mut w, &cranker, &mint, &batch, 2);
+        let events: Vec<ScriptPayout> = tx.events();
+        for p in &events {
+            assert!(p.lamports >= MIN_PAYOUT_LAMPORTS, "a holder is paid in full or left for a later step, never marked with 0: {}", p.lamports);
+        }
+        let s = state_of(&w, &mint);
+        println!("T9 pay step {steps_used}: {} events, round {} budget {} paid {} pile {} w_prev {}", events.len(), s.round, s.round_budget, s.round_paid, s.holder_pile, s.w_prev);
+        pays.extend(events);
+        steps_used += 1;
+        assert!(steps_used <= 16, "the eight holders are paid within sixteen steps");
+        w.env.warp(300);
+    }
+    println!("T9 paying: 8 payouts in {steps_used} steps");
+    assert_eq!(pays.len(), 8);
     let total: u64 = pays.iter().map(|p| p.lamports).sum();
-    assert!(total > 0, "week two pays: {:?}", pays.iter().map(|p| p.lamports).collect::<Vec<_>>());
     for (h, b0) in holders.iter().zip(before) {
         let paid = w.env.lamports(h) - b0;
+        assert!(paid >= MIN_PAYOUT_LAMPORTS, "{h} was paid");
         let rec = record_of(&w, &mint, h);
         assert_eq!(rec.paid, paid, "the hook's record matches the SOL paid to {h}");
     }
     // a moves everything to a fresh wallet z: z's clock starts now, this week's round has begun,
-    // so z is not measured or paid this week (not even touched: it is brought again next week).
+    // so z is touched (counted 0) while e, held since before the week, is paid in the same step.
     let z = w.env.funded(2 * SOL);
     let a_held = w.env.holding(&mint, &a.pubkey());
     let z_holding = token::holding_address(&mint, &z.pubkey());
@@ -480,13 +615,15 @@ fn t9_the_whole_story() {
         .ok();
     assert_eq!(record_of(&w, &mint, &a.pubkey()), Record::default(), "a's record is cleared");
     w.env.warp(21_601);
-    let tx = step(&mut w, &cranker, &mint, &[z.pubkey()]);
-    assert!(tx.result.is_ok(), "{}", tx.logs().join("\n"));
-    assert!(tx.events::<ScriptPayout>().is_empty(), "moved coins earn nothing this week");
-    assert_eq!(record_of(&w, &mint, &z.pubkey()).round, 0, "z is not even marked: it waits for next week");
+    let e_before = w.env.lamports(&e.pubkey());
+    let tx = payout_turn(&mut w, &cranker, &mint, &[z.pubkey(), e.pubkey()], 2);
+    let events: Vec<ScriptPayout> = tx.events();
+    assert_eq!(events.len(), 2, "z touched, e paid\n{}", tx.logs().join("\n"));
+    assert!(w.env.lamports(&e.pubkey()) > e_before, "e, held since before the week, is paid");
+    assert_eq!(record_of(&w, &mint, &z.pubkey()).paid, 0, "moved coins earn nothing this week");
+    assert_eq!(record_of(&w, &mint, &z.pubkey()).round, week2, "z is marked for the week");
     let s5 = state_of(&w, &mint);
-    assert_eq!(s5.holders_paid, total);
+    assert!(s5.holders_paid >= total);
     assert!(s5.round_paid <= s5.round_budget);
-    piles_equal_pot(&w, &mint);
     assert!(w.env.now > now0);
 }

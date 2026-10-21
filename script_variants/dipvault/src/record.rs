@@ -9,7 +9,8 @@
 //! offset 21 : paid        u64  lamports paid to this holding, all time
 //! offset 29 : entered_at  i64  when the holding last went from empty to funded
 //! offset 37 : flags       u8   bit 0: sold into the pool since `entered_at`
-//! offset 38 : reserved    26 bytes, zero
+//! offset 38 : measured    u64  the balance when the companion last recorded a payout or a touch
+//! offset 46 : reserved    18 bytes, zero
 
 use crate::params::{MIN_HOLD_SECS, NEVER_SOLD_BONUS_BPS, WEIGHT_TIERS};
 
@@ -31,6 +32,7 @@ pub mod record_offsets {
     pub const PAID: usize = 21;
     pub const ENTERED_AT: usize = 29;
     pub const FLAGS: usize = 37;
+    pub const MEASURED: usize = 38;
 }
 
 /// A holding's record.
@@ -43,6 +45,7 @@ pub struct Record {
     pub paid: u64,
     pub entered_at: i64,
     pub flags: u8,
+    pub measured: u64,
 }
 
 fn u64_at(data: &[u8], at: usize) -> u64 {
@@ -65,6 +68,7 @@ impl Record {
             paid: u64_at(data, o::PAID),
             entered_at: u64_at(data, o::ENTERED_AT) as i64,
             flags: data[o::FLAGS],
+            measured: u64_at(data, o::MEASURED),
         }
     }
 
@@ -94,13 +98,15 @@ pub fn tier_bps(held: i64) -> u16 {
     bps
 }
 
-/// A holding's payout weight at `now`: its balance times its hold-time multiplier, plus the
-/// never-sold bonus. 0 for a holding under the least hold, or with no record.
-pub fn weight(r: &Record, balance: u64, now: i64) -> u128 {
+/// A holding's payout weight as of `at` (a round's first second): `balance` times its hold-time
+/// multiplier at that time, plus the never-sold bonus. 0 for a holding under the least hold then,
+/// or with no record. Measuring a round and paying it the round after use the same `at` and the
+/// balance capped at the one measured, so the shares paid never add up past the budget.
+pub fn weight(r: &Record, balance: u64, at: i64) -> u128 {
     if !r.is_set() {
         return 0;
     }
-    let held = now.saturating_sub(r.stamp);
+    let held = at.saturating_sub(r.stamp);
     let tier = u128::from(tier_bps(held));
     if tier == 0 {
         return 0;

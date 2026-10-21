@@ -10,54 +10,98 @@ Not audited.
 |---|---|---|
 | Hook `hook_variants/dipvault/src/{lib.rs,clock.rs}` + `hook.json` | IMPLEMENTED, COMPILED (host, `no-entrypoint`) | `cd harness && cargo test` |
 | Script `script_variants/dipvault/src/*.rs` (8 files) + `keeper.json` | IMPLEMENTED, COMPILED (host) | same |
-| Host tests T15-T19 (40 tests) | TEST-EXECUTED, all pass | `cargo test`: 161 passed, 0 failed (T1-T14 still green) |
+| Host tests T15-T19 (44 tests) | TEST-EXECUTED, all pass | `cargo test`: 165 passed, 0 failed (T1-T14 still green) |
 | Workshop rule scan (`tools/scan_rules.py dist`) | TEST-EXECUTED, clean | `python3 -I tools/make_variants.py && python3 -I tools/scan_rules.py dist` |
 | SBF build (`cargo build-sbf --tools-version v1.57 --arch v3`) | COMPILED (owner approved the toolchain install 2026-10-21; solana-cli 4.3.1, platform-tools v1.57) | `target-sbf/dipvault_hook.so` 200 KB, `dipvault_script.so` 220 KB |
-| T9: the real `companion_step` in LiteSVM, the whole story (`litesvm/tests/t9_dipvault.rs`) | TEST-EXECUTED, passes | `cd litesvm && cargo test` (needs the 21 Bordrless `.so` built from `ref/`, see below) |
+| T9: the real `companion_step` in LiteSVM, the whole story (`litesvm/tests/t9_dipvault.rs`) | TEST-EXECUTED, passes twice: against the programs built from the pinned source AND against the live mainnet program bytes (`solana program dump`, 2026-10-21) | `cd litesvm && cargo test`, then the same with `SBF_OUT_DIR=../ref/bordrless-programs/target/deploy-mainnet` |
 | Workshop trading test, reading, approval | NOT DONE | needs a submission, which is the owner's step |
+| Binaries at this commit | `target-sbf/dipvault_hook.so` sha256 579ef9886d728e9e12c13a39c5dcdc79648cdc0bf503c25954163569fe989b15; `dipvault_script.so` b062d0a94f6ca209643a86dae2c6cef992a66d077ce99eadf3bcf82f215042df | rebuilt from the committed source before the T9 runs recorded below |
 
-## T9: what the LiteSVM run proves (2026-10-21)
+## T9: what the LiteSVM run proves (2026-10-21, after the package review)
 
-One test, against the Bordrless programs built from the pinned source (`ref/bordrless-programs`
-@ c6676977, 15 programs + 6 test fixtures, `cargo build-sbf` each) and the pair's own SBF builds:
-`prepare`; a quote-cut config (buys capped 1, sells 80) naming the hook with flags 145; a native
-script launch with the payout terms and wallet payouts allowed (`companion.create`, the hook's
-`prepare`, `create_script_v2`, `allow_wallet_payouts`, `launch_script`); three buys that start
-hold clocks; an early sell that pays the brake (`Launch.quote_cut_accrued` grows) and a sell after
-10 minutes that pays nothing; the relay in the hook state names the last seller; a real delegate sale (an old dust wallet signs the sell of a young holding's coins through
-`swap_v2` with the young holding in the trader's slot): the DEX accepts it, the brake is taken
-through the relay, the relay names the real source, the dust wallet's own coins are untouched;
-the fees claimed into the pot; the first step splits them and pays the builder wallet; a whale pump, eight steps
-that raise the reference, a dump, then a step that buys the dip and keeps the coins
-(`tokens_held`); the curve filled and graduated; a step that adds locked liquidity and the LP
-lands in `Launch.lp_holding` by exactly `lp_minted`; a new week in which a step measures the
-three holders (touches, 0 lamports, the hook writes the round); the same holders are not touched
-again that week; the next week a step pays them and each holder's hook record `paid` equals the
-SOL its wallet gained. After every step the script's four piles equal the companion's
-`pending_pot`.
+One test, run twice: against the 15 Bordrless programs built from the pinned source
+(`ref/bordrless-programs` @ c6676977) and against the same 14 programs dumped from mainnet on
+2026-10-21 (`target/deploy-mainnet`, hashes in the run log; the test-only `hook_tester` and the
+fixtures stay local builds). Both runs pass with the pair's own SBF builds. What it asserts:
 
-T9 found one real bug, fixed in `c1747c1`: a due liquidity add preempted the holder payouts on
-every step, so holders were never paid once the launch graduated. Now payouts take every other
-step when both are due.
+- `prepare`; a quote-cut config (buys capped 1, sells 80) naming the hook with flags 145; a
+  native script launch with open payout terms and wallet payouts allowed.
+- Three buys stamp hold clocks; b's clock equals its buy time after a sell two minutes later.
+- The early sell's cut is 79 to 80 bps of the swap's `amount_out` (the launchpad is told the SOL
+  out after the DEX's 0.3% LP fee); a sell after 10 minutes adds nothing; the relay names the
+  seller.
+- A real delegate sale: an old dust wallet signs the sell of a young holding's coins through
+  `swap_v2`; the DEX accepts it, the brake is taken through the relay, the relay names the real
+  source, the dust wallet's coins are untouched. (The launchpad hands `quote_cut` the signer's
+  holding, so without the relay the cut would be 0.)
+- The first step's split, exactly: 1% to the builder (pool under 5 SOL), the rest 3,333 / 3,333 /
+  3,334, the one-entry bounty (2,500) out of the dip pile; the builder wallet gains what the
+  wallet answer says.
+- A whale pump; eight steps raise the reference (asserted); a dump; the dip step buys: the SOL
+  spent equals the dip pile's exact change (its third of the new money, less the bounty) and
+  equals the swap's `amount_in`, and is at most 1% of the pool's real SOL; the coins are kept
+  (`tokens_held` equals the holding's gain).
+- The curve filled and graduated; the liquidity step adds: `LiquidityAdded.lp_minted` equals
+  `lp_minted`, the pair is at the pool's ratio (quote = ceil(base * Q / B), or base =
+  ceil(quote * B / Q) when the SOL budget binds), no wrapped SOL is left in the creator's
+  bridged-SOL holding, the coins paired equal the fall in `tokens_held`, and no swap ran (the pot
+  held enough coins: the shortfall-buy path is NOT exercised by T9; the dev bag is 0 in T9).
+- The step's size: with the protocol lookup table as it is on mainnet (22 entries), a step with
+  the swap accounts, the payout accounts, the builder wallet and ONE holder is 1,219 bytes of the
+  1,232 allowed (31 static keys); two holders do not fit. `keeper.json` `perStep` is 1; the test
+  asserts it matches what fits.
+- Week one: nine holders measured one a step (touches, 0 lamports); the hook records the round
+  and the balance measured; a payout-turn step with already-measured holders answers nothing.
+- Week two: all eight holders paid, one a step, eight steps, each at least the least payout,
+  none ever marked with 0; 98.8% of the round's budget paid out; each holder's hook record
+  `paid` equals the SOL its wallet gained.
+- a moves everything to a fresh wallet z; in the same payout-turn step z is touched (0, marked)
+  and e, measured the week before, is paid.
+- After every step that lands, the script's four piles equal the companion's `pending_pot`
+  (checked inside the test's `step`).
 
-Measured in T9 (eight holders in the payout weeks, `cargo test -- --nocapture`):
+Bugs T9 found, all fixed:
+1. (`c1747c1`) a due liquidity add preempted the holder payouts on every step after graduation.
+2. (today) with a 20% step cap, a holder whose weekly share exceeded it was skipped for ever:
+   the companion's step and holding caps are now open (the script's piles are the real bound),
+   pinned by T18.
+3. (today) shares were this week's weight over last week's total; weights grow during a week
+   (tiers rise, top-ups), so the first holders took the whole budget and the rest got 0. Now the
+   hook records the balance at measurement (`measured`), and a holding is paid the round after
+   by its weight on the SAME basis the total was measured on (hold time at that round's first
+   second, balance capped at the measured one). The shares cannot add up past the budget
+   (T17 pins it; T9 pays 98.8% with nothing stranded).
+
+Measured in T9 (both runs; CU varies run to run by about 10%):
 
 | Step | Compute units | Instructions in the trace (limit 64) | Max CPI height (limit 5) |
 |---|---|---|---|
-| dip buy | 293,999 | 17 | 5 |
-| liquidity add (buy, wrap, add) | 296,909 | 21 | 5 |
-| measuring step, 8 touches | 415,667 | 37 | 4 |
-| paying step, 8 payouts | 414,282 | 39 | 4 |
+| dip buy | 280k to 335k | 17 | 5 |
+| liquidity add (wrap, add; no shortfall buy ran) | 295k to 345k | 21 | 5 |
+| one-holder payout step | under 420k | under 40 | 4 |
 
 All within the keeper's budget (Bordrless cranks steps with about 600,000 CU per the SDK page).
+
+What T9 does NOT establish: the shortfall buy inside a liquidity step; a launch with a dev bag;
+the keeper's real account set (the test builds the step from the swap, payout and unwrap
+account lists, deduplicated; the live keeper's set is Bordrless's); a withdrawal attempt on the
+launch's LP holding (the lock is the launchpad's, documented, not this pair's code).
+
+One holder a step means weekly reach is bounded: one holder per 5-minute step is 288 a day,
+about 2,000 a week, on a coin whose dip buys and liquidity adds also take steps. A coin with
+more eligible holders pays the first ones the keeper brings each week; the rest wait. This is
+a platform limit (one transaction a step, 1,232 bytes) and the owner should know it.
 
 To reproduce: install the Solana CLI (`sh -c "$(curl -sSfL https://release.anza.xyz/stable/install)"`),
 build the Bordrless programs into `ref/bordrless-programs/target/deploy` (the loop in
 `scripts/solana/programs.sh cmd_build`, plus the fixtures under `programs/tests/fixtures/`),
-build the pair (`cargo build-sbf --manifest-path hook_variants/dipvault/Cargo.toml --sbf-out-dir
-target-sbf`, the same for `script_variants/dipvault`), then `cd litesvm && cargo test`. The
-`declare_id!` values in both crates are the local build keypairs' addresses (public keys only;
-the keypairs stay in the ignored `target-sbf/`); Bordrless writes the real ids at submission.
+optionally dump the live ones (`solana program dump -u mainnet-beta <id> <name>.so` for each id
+in `Anchor.toml` `[programs.mainnet]`, into `target/deploy-mainnet`, with the test-only `.so`
+copied in), build the pair (`cargo build-sbf --tools-version v1.57 --arch v3 --manifest-path
+hook_variants/dipvault/Cargo.toml --sbf-out-dir target-sbf`, the same for
+`script_variants/dipvault`), then `cd litesvm && cargo test -- --nocapture`. The `declare_id!`
+values in both crates are the local build keypairs' addresses (public keys only; the keypairs
+stay in the ignored `target-sbf/`); Bordrless writes the real ids at submission.
 
 ## The three feasibility checks (DIP-VAULT.md BUILD ORDER 1-3): all buildable, with sources
 
@@ -118,11 +162,13 @@ the base transfer into the vault (which runs the token hook's `before_transfer`)
   the lp thing like liquiditytek does"): the coins bought stay in the companion's holding
   (`tokens_held`), never sold, and the liquidity steps pair them into locked LP. This replaces
   DIP-VAULT.md v5 item 6's "bought tokens burned".
-- Weekly holder payouts: rounds are weeks (`ROUND_SECS` 604,800, the keeper's epoch). Each
-  holding the keeper brings is measured once a round (weight = balance x tier: 1x from 6 h,
-  1.5x from 7 d, 2x from 30 d, plus 10% if it never sold since funded) and paid from the round's
-  budget (the holder pile at the round's first step) by its share of the total measured the
-  round before. The first round measures only; payouts start in week two. A holding under 6
+- Weekly holder payouts: rounds are weeks (`ROUND_SECS` 604,800, the keeper's epoch; weeks
+  start Thursday 00:00 UTC). Each holding the keeper brings is measured once a round at the
+  round's first second (weight = balance x tier: 1x from 6 h, 1.5x from 7 d, 2x from 30 d, plus
+  10% if it never sold since funded; the hook records the balance measured) and, if it was
+  measured the round before, paid from the round's budget (the holder pile at the round's first
+  step) by its weight on that round's basis over that round's total. The first round measures
+  only; payouts start in week two. One holder a step (what fits one transaction). A holding under 6
   hours is touched (counted 0) so it is not brought again that week. At most 8 entries a step.
 - Locked liquidity: at most one add per 10 minutes after graduation (yielding every other step
   to holder payouts when both are due), a tranche of 1/24 of the liquidity pile (about 4 hours a
@@ -157,12 +203,24 @@ the base transfer into the vault (which runs the token hook's `before_transfer`)
 
 ## Review findings (2026-10-21, independent pass over commits through 091dc22)
 
-Fixed: double pay by moving coins (round-start rule); a sender omitting a holder's wallet
-(skip, not touch); the liquidity buy could exceed the pool cap below the least buy (skipped);
-an add the DEX would refuse (`DepositTooSmall`) blocking every later add (skipped when the LP
-would be 0); the "holders waiting" check matched the pool's own vault (now the payout loop's
-filter); a repeated or read-only holding failing the whole step (skipped); dust holdings in
-the keeper slots (`minBalance`); LP pace 24 adds per pile; stale `dist/` (regenerated).
+Scoped review (REVIEW2): fixed: double pay by moving coins (round-start rule); a sender
+omitting a holder's wallet (skip, not touch); the liquidity buy could exceed the pool cap below
+the least buy (skipped); an add the DEX would refuse (`DepositTooSmall`) blocking every later
+add (skipped when the LP would be 0); the "holders waiting" check matched the pool's own vault
+(now the payout loop's filter); a repeated or read-only holding failing the whole step
+(skipped); dust holdings in the keeper slots (`minBalance` 1,000 coins); LP pace 24 adds per
+pile; stale `dist/` (regenerated).
+Package review (REVIEW3, 34 findings): the blocker (six of eight holders paid 0 and locked out)
+and the overpay behind it fixed as above (`Decision::Skip`, the measured basis); `perStep` 1 from
+measurement; `roundSecs` added; the view label "SOL into liquidity"; late clocks touched; the
+words rewritten (no "no early-sell tax", no "0% buys", the week-start rule and the 1,000-coin
+floor stated, "locked LP" without "for ever"); the step-count and the forbidden-word tests
+tightened (T16 checks the piles before reconcile; T19 scans every shipped text by whole word);
+T9 asserts the exact split, the exact dip spend, the brake rate, the pool ratio, the reference
+rise, the measured balances; the handoff repo gets WALLET.txt and tools/fetch_refs.sh and a
+current README. Open: the shortfall-buy and dev-bag paths untested on chain; T9's account set
+is the test's, not the keeper's. The full-diff review (a third reviewer) had not reported by
+the end of the day.
 Open, flagged above: the registry's two fixed keys (LiquidityTek precedent, unconfirmed by the
 rule text); `record_payout` as a state-writing instruction the AI reading may mark.
 
@@ -199,9 +257,9 @@ rule text); `record_payout` as a state-writing instruction the AI reading may ma
 
 ## How to reproduce
 
-    cd harness && cargo test            # 161 passed
+    cd harness && cargo test            # 165 passed
     python3 -I tools/make_variants.py   # writes dist/dipvault/{hook,script}
     python3 -I tools/scan_rules.py dist # clean
 
 Submission files: `dist/dipvault/hook/src/*.rs` + `hook.json`; `dist/dipvault/script/src/*.rs` +
-`keeper.json`; words in `variants/dipvault/notes.txt` (596 chars). The owner submits.
+`keeper.json`; words in `variants/dipvault/notes.txt` (595 chars). The owner submits.

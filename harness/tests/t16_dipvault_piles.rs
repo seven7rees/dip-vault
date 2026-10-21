@@ -116,6 +116,8 @@ fn n_step_simulation_keeps_the_piles_equal_to_the_pot() {
         let short = piles.take(bounty);
         assert_eq!(short, 0, "the bounty is always covered when the companion pays it");
         let pot_left = pot_after - paid_holders - pay_builder - bounty;
+        // The exact accounting leaves nothing for reconcile to do: the piles already equal the pot.
+        assert_eq!(piles.total(), pot_left, "before reconcile, step {step}");
         piles.reconcile(pot_left);
         assert_eq!(piles.total(), pot_left, "after the step, step {step}");
         out_total += spent + paid_holders + pay_builder + bounty;
