@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "holdings": null,
+  "swapAccounts": true,
+  "hookAccounts": false,
+  "mintWritable": true,
+  "payouts": false,
+  "wallets": [
+    "AxoN4hpQJWKFkSimhqnA7dUsqf5VGojA5RhhZTiP4KFm"
+  ],
+  "stepSecs": 300,
+  "stateLen": 128,
+  "payoutTerms": {
+    "stepBps": 1000,
+    "holdingBps": 10000,
+    "windowBps": 5000,
+    "windowSecs": 86400
+  },
+  "launcherShareBps": 5000
+}
